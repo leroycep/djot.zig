@@ -33,8 +33,13 @@ pub fn parse(allocator: std.mem.Allocator, source: []const u8) ![]Event {
     while (true) {
         const tok = nextToken(source, pos);
         switch (tok.kind) {
+            .single_newline => {},
             .text => {
-                try events.append(.{ .text = std.mem.trim(u8, source[tok.start..tok.end], "\n") });
+                try events.append(.{ .text = source[tok.start..tok.end] });
+            },
+            .double_newline => {
+                try events.append(.close_paragraph);
+                try events.append(.start_paragraph);
             },
             .eof => break,
         }
@@ -52,6 +57,8 @@ pub const Token = struct {
 
     pub const Kind = enum {
         text,
+        double_newline,
+        single_newline,
         eof,
     };
 };
@@ -63,6 +70,7 @@ pub fn nextToken(source: []const u8, pos: usize) Token {
         curly_brace_open,
         comment,
         comment_percent,
+        newline,
     };
 
     var res = Token{
@@ -81,11 +89,13 @@ pub fn nextToken(source: []const u8, pos: usize) Token {
                     res.end = i;
                     state = .curly_brace_open;
                 },
-                else => {
-                    res.kind = .text;
+                '\n' => {
+                    res.kind = .single_newline;
                     i += 1;
                     res.end = i;
+                    state = .newline;
                 },
+                else => state = .text,
             },
             .curly_brace_open => switch (source[i]) {
                 '%' => {
@@ -113,12 +123,21 @@ pub fn nextToken(source: []const u8, pos: usize) Token {
                 }
             },
             .text => switch (source[i]) {
-                '{' => break,
+                '{', '\n' => break,
                 else => {
                     res.kind = .text;
                     i += 1;
                     res.end = i;
                 },
+            },
+            .newline => switch (source[i]) {
+                '\n' => {
+                    res.kind = .double_newline;
+                    i += 1;
+                    res.end = i;
+                    break;
+                },
+                else => break,
             },
         }
     }
