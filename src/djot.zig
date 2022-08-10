@@ -12,8 +12,11 @@ pub fn toHtml(allocator: std.mem.Allocator, source: []const u8) ![]const u8 {
             .newline => try html.appendSlice("\n"),
             .start_paragraph => try html.appendSlice("<p>"),
             .close_paragraph => try html.appendSlice("</p>\n"),
-            .start_inline_code => try html.appendSlice("<code>"),
-            .close_inline_code => try html.appendSlice("</code>"),
+            .verbatim_inline => |verbatim| {
+                try html.appendSlice("<code>");
+                try html.appendSlice(verbatim);
+                try html.appendSlice("</code>");
+            },
         }
     }
 
@@ -23,9 +26,7 @@ pub fn toHtml(allocator: std.mem.Allocator, source: []const u8) ![]const u8 {
 pub const Event = union(enum) {
     newline,
     text: []const u8,
-
-    start_inline_code: []const u8,
-    close_inline_code: []const u8,
+    verbatim_inline: []const u8,
 
     start_paragraph,
     close_paragraph,
@@ -57,12 +58,12 @@ pub fn parse(allocator: std.mem.Allocator, source: []const u8) ![]Event {
     return events.toOwnedSlice();
 }
 
-const Paragraph = struct {
+const Parse = struct {
     events: []Event,
     end_pos: usize,
 };
 
-fn parseParagraph(allocator: std.mem.Allocator, source: []const u8, start_pos: usize) !?Paragraph {
+fn parseParagraph(allocator: std.mem.Allocator, source: []const u8, start_pos: usize) !?Parse {
     var pos = start_pos;
     var events = std.ArrayList(Event).init(allocator);
     defer events.deinit();
@@ -74,7 +75,6 @@ fn parseParagraph(allocator: std.mem.Allocator, source: []const u8, start_pos: u
 
     var in_attr = false;
     var in_comment = false;
-    var style_code: ?[]const u8 = null;
 
     while (true) {
         const tok = nextToken(source, pos);
@@ -86,43 +86,87 @@ fn parseParagraph(allocator: std.mem.Allocator, source: []const u8, start_pos: u
             continue;
         }
         switch (tok.kind) {
-            .single_newline => if (style_code != null) {
-                try events.append(.newline);
-            },
-            .text => {
-                try events.append(.{ .text = source[tok.start..tok.end] });
-            },
+            .single_newline => {},
+            .text,
+            .spaces,
+            => try events.append(.{ .text = source[tok.start..tok.end] }),
             .curly_brace_open => in_attr = true,
             .curly_brace_close => in_attr = false,
             .percent => if (in_attr) {
                 in_comment = true;
             },
             .ticks => {
-                if (style_code) |opener| {
-                    if (std.mem.eql(u8, source[tok.start..tok.end], opener)) {
-                        try events.append(.{ .close_inline_code = source[tok.start..tok.end] });
-                        style_code = null;
-                    } else {
-                        try events.append(.{ .text = source[tok.start..tok.end] });
-                    }
+                if (try parseVerbatim(allocator, source, pos)) |verbatim| {
+                    try events.append(.{ .verbatim_inline = verbatim.text });
+                    pos = verbatim.end_pos;
+                    continue;
                 } else {
-                    style_code = source[tok.start..tok.end];
-                    try events.append(.{ .start_inline_code = source[tok.start..tok.end] });
+                    try events.append(.{ .text = source[tok.start..tok.end] });
                 }
             },
             .double_newline, .eof => break,
         }
         pos = tok.end;
     }
-    if (style_code) |opener| {
-        while (events.items.len > 0 and events.items[events.items.len - 1] == .newline) {
-            _ = events.pop();
+
+    return Parse{
+        .events = events.toOwnedSlice(),
+        .end_pos = pos,
+    };
+}
+
+const Verbatim = struct {
+    text: []const u8,
+    end_pos: usize,
+};
+
+fn parseVerbatim(allocator: std.mem.Allocator, source: []const u8, start_pos: usize) !?Verbatim {
+    var pos = start_pos;
+    const opener = switch (nextToken(source, start_pos).kind) {
+        .ticks => nextToken(source, start_pos),
+        else => return null,
+    };
+
+    pos = opener.end;
+
+    // Find end of verbatim and get list of tokens that are easier to manipulate than raw `nextToken` calls
+    var tokens = std.ArrayList(Token).init(allocator);
+    defer tokens.deinit();
+    while (true) {
+        const tok = nextToken(source, pos);
+
+        if (tok.kind == .eof) {
+            break;
         }
-        try events.append(.{ .close_inline_code = opener });
+        if (std.mem.eql(u8, source[tok.start..tok.end], source[opener.start..opener.end])) {
+            pos = tok.end;
+            break;
+        }
+
+        try tokens.append(tok);
+        pos = tok.end;
     }
 
-    return Paragraph{
-        .events = events.toOwnedSlice(),
+    // Check if content begins or ends with a tick
+    const content_has_ticks = blk: {
+        if (tokens.items.len > 0 and tokens.items[0].kind == .ticks) break :blk true;
+        if (tokens.items.len > 1 and tokens.items[0].kind == .spaces and tokens.items[1].kind == .ticks) break :blk true;
+
+        const end = tokens.items.len -| 1;
+        if (tokens.items.len > 0 and tokens.items[end].kind == .ticks) break :blk true;
+        if (tokens.items.len > 1 and tokens.items[end].kind == .spaces and tokens.items[end - 1].kind == .ticks) break :blk true;
+
+        break :blk false;
+    };
+
+    const span_starts_with_spaces = tokens.items.len > 0 and tokens.items[0].kind == .spaces;
+    const span_ends_with_spaces = tokens.items.len > 1 and tokens.items[tokens.items.len - 1].kind == .spaces;
+
+    const verbatim_start = if (content_has_ticks and span_starts_with_spaces) tokens.items[0].start + 1 else tokens.items[0].start;
+    const verbatim_end = if (content_has_ticks and span_ends_with_spaces) tokens.items[tokens.items.len - 1].end - 1 else tokens.items[tokens.items.len - 1].end;
+
+    return Verbatim{
+        .text = std.mem.trimRight(u8, source[verbatim_start..verbatim_end], "\n"),
         .end_pos = pos,
     };
 }
@@ -136,6 +180,7 @@ pub const Token = struct {
         text,
         double_newline,
         single_newline,
+        spaces,
         curly_brace_open,
         curly_brace_close,
         percent,
@@ -153,6 +198,7 @@ pub fn nextToken(source: []const u8, pos: usize) Token {
         comment_percent,
         newline,
         ticks,
+        spaces,
     };
 
     var res = Token{
@@ -194,6 +240,12 @@ pub fn nextToken(source: []const u8, pos: usize) Token {
                     i += 1;
                     res.end = i;
                     state = .ticks;
+                },
+                ' ' => {
+                    res.kind = .spaces;
+                    i += 1;
+                    res.end = i;
+                    state = .spaces;
                 },
                 else => state = .text,
             },
@@ -237,6 +289,13 @@ pub fn nextToken(source: []const u8, pos: usize) Token {
                     i += 1;
                     res.end = i;
                     break;
+                },
+                else => break,
+            },
+            .spaces => switch (source[i]) {
+                ' ' => {
+                    i += 1;
+                    res.end = i;
                 },
                 else => break,
             },
