@@ -147,6 +147,7 @@ fn parseParagraph(allocator: std.mem.Allocator, start_cursor: Cursor) !?Parse {
                     defer allocator.free(link.desc);
                     try events.append(.{ .start_link = link.url });
                     try events.appendSlice(link.desc);
+                    try events.append(.close_link);
                     cursor.token_index = link.end_index;
                     continue;
                 } else {
@@ -185,12 +186,15 @@ const ParseLink = struct {
     end_index: Cursor.TokenIndex,
 };
 
-fn parseLink(allocator: std.mem.Allocator, start_cursor: Cursor) !?ParseLink {
+fn parseLink(allocator: std.mem.Allocator, start_cursor: Cursor) anyerror!?ParseLink {
     var cursor = start_cursor;
 
     // Parse hyperlink text
-    _ = cursor.eat(.square_brace_open) orelse return null;
-    const desc = cursor.until(.square_brace_close) orelse return null;
+    const desc = (try parseLinkText(allocator, cursor)) orelse return null;
+    cursor.token_index = desc.end_index;
+
+    var events = std.ArrayList(Event).fromOwnedSlice(allocator, desc.events);
+    defer events.deinit();
 
     // Parse hyperlink URL
     _ = cursor.eat(.parenthesis_open) orelse return null;
@@ -199,22 +203,98 @@ fn parseLink(allocator: std.mem.Allocator, start_cursor: Cursor) !?ParseLink {
     const url_start = cursor.token_starts[url_token_range[0]];
     const url_end = cursor.tokenAt(url_token_range[1] - 1).end;
 
-    var events = std.ArrayList(Event).init(allocator);
-    defer events.deinit();
-
-    var i = desc[0];
-    while (i < desc[1] - 1) : (i += 1) {
-        switch (cursor.token_kinds[i]) {
-            .text => try events.append(.{ .text = cursor.tokenText(i) }),
-            else => try events.append(.{ .text = cursor.tokenText(i) }),
-        }
-    }
-
-    std.debug.print("{s}:{}\n", .{ @src().fn_name, @src().line });
-
     return ParseLink{
         .url = cursor.source[url_start..url_end],
         .desc = events.toOwnedSlice(),
+        .end_index = cursor.token_index,
+    };
+}
+
+fn parseLinkText(allocator: std.mem.Allocator, start_cursor: Cursor) anyerror!?Parse {
+    var cursor = start_cursor;
+    var events = std.ArrayList(Event).init(allocator);
+    defer events.deinit();
+
+    _ = cursor.eat(.square_brace_open) orelse return null;
+
+    switch (cursor.token_kinds[cursor.token_index]) {
+        .eof, .double_newline => return null,
+        else => {},
+    }
+
+    var in_attr = false;
+
+    while (true) {
+        switch (cursor.token_kinds[cursor.token_index]) {
+            .double_newline,
+            .eof,
+            => break,
+
+            .square_brace_close => {
+                cursor.token_index += 1;
+                break;
+            },
+
+            .text,
+            .spaces,
+            => try events.append(.{ .text = cursor.tokenText(cursor.token_index) }),
+
+            .single_newline => switch (cursor.token_kinds[cursor.token_index + 1]) {
+                .single_newline => unreachable,
+
+                .eof,
+                .double_newline,
+                => {},
+
+                else => try events.append(.{ .text = cursor.tokenText(cursor.token_index) }),
+            },
+
+            .autolink => {
+                if (try parseAutoLink(cursor)) |autolink| {
+                    try events.append(autolink.event);
+                    cursor.token_index = autolink.end_index;
+                    continue;
+                } else {
+                    return error.AutoLinkWasntAutoLink;
+                }
+            },
+
+            .exclaimation => {},
+            .parenthesis_open => {},
+            .parenthesis_close => {},
+            .square_brace_open => {
+                if (try parseLink(allocator, cursor)) |link| {
+                    defer allocator.free(link.desc);
+                    try events.append(.{ .start_link = link.url });
+                    try events.appendSlice(link.desc);
+                    try events.append(.close_link);
+                    cursor.token_index = link.end_index;
+                    continue;
+                } else {
+                    try events.append(.{ .text = cursor.tokenText(cursor.token_index) });
+                }
+            },
+
+            .curly_brace_open => in_attr = true,
+            .curly_brace_close => in_attr = false,
+            .percent => if (in_attr) {
+                _ = cursor.until(.percent) orelse return error.UnclosedComment;
+            },
+            .ticks => {
+                if (parseVerbatim(cursor)) |verbatim| {
+                    try events.append(.{ .verbatim_inline = verbatim.text });
+                    cursor.token_index = verbatim.end_index;
+                    continue;
+                } else {
+                    try events.append(.{ .text = cursor.tokenText(cursor.token_index) });
+                }
+            },
+        }
+        cursor.token_index += 1;
+    }
+
+    return Parse{
+        .events = events.toOwnedSlice(),
         .end_index = cursor.token_index,
     };
 }
