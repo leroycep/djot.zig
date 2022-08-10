@@ -9,8 +9,11 @@ pub fn toHtml(allocator: std.mem.Allocator, source: []const u8) ![]const u8 {
     for (events) |event| {
         switch (event) {
             .text => |t| try html.appendSlice(t),
+            .newline => try html.appendSlice("\n"),
             .start_paragraph => try html.appendSlice("<p>"),
             .close_paragraph => try html.appendSlice("</p>\n"),
+            .start_inline_code => try html.appendSlice("<code>"),
+            .close_inline_code => try html.appendSlice("</code>"),
         }
     }
 
@@ -18,7 +21,11 @@ pub fn toHtml(allocator: std.mem.Allocator, source: []const u8) ![]const u8 {
 }
 
 pub const Event = union(enum) {
+    newline,
     text: []const u8,
+
+    start_inline_code: []const u8,
+    close_inline_code: []const u8,
 
     start_paragraph,
     close_paragraph,
@@ -28,12 +35,47 @@ pub fn parse(allocator: std.mem.Allocator, source: []const u8) ![]Event {
     var events = std.ArrayList(Event).init(allocator);
     defer events.deinit();
 
-    try events.append(.start_paragraph);
+    var pos: usize = 0;
+    while (true) {
+        if (try parseParagraph(allocator, source, pos)) |paragraph| {
+            defer allocator.free(paragraph.events);
+            try events.append(.start_paragraph);
+            try events.appendSlice(paragraph.events);
+            try events.append(.close_paragraph);
+            pos = paragraph.end_pos;
+            continue;
+        }
+        const tok = nextToken(source, pos);
+        switch (tok.kind) {
+            .double_newline => {},
+            .eof => break,
+            else => return error.TODO,
+        }
+        pos = tok.end;
+    }
+
+    return events.toOwnedSlice();
+}
+
+const Paragraph = struct {
+    events: []Event,
+    end_pos: usize,
+};
+
+fn parseParagraph(allocator: std.mem.Allocator, source: []const u8, start_pos: usize) !?Paragraph {
+    var pos = start_pos;
+    var events = std.ArrayList(Event).init(allocator);
+    defer events.deinit();
+
+    switch (nextToken(source, start_pos).kind) {
+        .eof, .double_newline => return null,
+        else => {},
+    }
 
     var in_attr = false;
     var in_comment = false;
+    var style_code: ?[]const u8 = null;
 
-    var pos: usize = 0;
     while (true) {
         const tok = nextToken(source, pos);
         if (in_comment) {
@@ -44,7 +86,9 @@ pub fn parse(allocator: std.mem.Allocator, source: []const u8) ![]Event {
             continue;
         }
         switch (tok.kind) {
-            .single_newline => {},
+            .single_newline => if (style_code != null) {
+                try events.append(.newline);
+            },
             .text => {
                 try events.append(.{ .text = source[tok.start..tok.end] });
             },
@@ -53,17 +97,34 @@ pub fn parse(allocator: std.mem.Allocator, source: []const u8) ![]Event {
             .percent => if (in_attr) {
                 in_comment = true;
             },
-            .double_newline => {
-                try events.append(.close_paragraph);
-                try events.append(.start_paragraph);
+            .ticks => {
+                if (style_code) |opener| {
+                    if (std.mem.eql(u8, source[tok.start..tok.end], opener)) {
+                        try events.append(.{ .close_inline_code = source[tok.start..tok.end] });
+                        style_code = null;
+                    } else {
+                        try events.append(.{ .text = source[tok.start..tok.end] });
+                    }
+                } else {
+                    style_code = source[tok.start..tok.end];
+                    try events.append(.{ .start_inline_code = source[tok.start..tok.end] });
+                }
             },
-            .eof => break,
+            .double_newline, .eof => break,
         }
         pos = tok.end;
     }
-    try events.append(.close_paragraph);
+    if (style_code) |opener| {
+        while (events.items.len > 0 and events.items[events.items.len - 1] == .newline) {
+            _ = events.pop();
+        }
+        try events.append(.{ .close_inline_code = opener });
+    }
 
-    return events.toOwnedSlice();
+    return Paragraph{
+        .events = events.toOwnedSlice(),
+        .end_pos = pos,
+    };
 }
 
 pub const Token = struct {
@@ -78,6 +139,7 @@ pub const Token = struct {
         curly_brace_open,
         curly_brace_close,
         percent,
+        ticks,
         eof,
     };
 };
@@ -90,6 +152,7 @@ pub fn nextToken(source: []const u8, pos: usize) Token {
         comment,
         comment_percent,
         newline,
+        ticks,
     };
 
     var res = Token{
@@ -126,6 +189,12 @@ pub fn nextToken(source: []const u8, pos: usize) Token {
                     res.end = i;
                     state = .newline;
                 },
+                '`' => {
+                    res.kind = .ticks;
+                    i += 1;
+                    res.end = i;
+                    state = .ticks;
+                },
                 else => state = .text,
             },
             .curly_brace_open => switch (source[i]) {
@@ -150,7 +219,12 @@ pub fn nextToken(source: []const u8, pos: usize) Token {
                 }
             },
             .text => switch (source[i]) {
-                '{', '\n', '}', '%' => break,
+                '{',
+                '\n',
+                '}',
+                '%',
+                '`',
+                => break,
                 else => {
                     res.kind = .text;
                     i += 1;
@@ -163,6 +237,13 @@ pub fn nextToken(source: []const u8, pos: usize) Token {
                     i += 1;
                     res.end = i;
                     break;
+                },
+                else => break,
+            },
+            .ticks => switch (source[i]) {
+                '`' => {
+                    i += 1;
+                    res.end = i;
                 },
                 else => break,
             },
