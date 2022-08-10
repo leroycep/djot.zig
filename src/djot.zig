@@ -19,6 +19,8 @@ pub fn toHtml(allocator: std.mem.Allocator, source: []const u8) ![]const u8 {
             },
             .start_link => |url| try html.writer().print("<a href=\"{}\">", .{std.zig.fmtEscapes(url)}),
             .close_link => try html.appendSlice("</a>"),
+            .start_image_link => try html.writer().print("<img alt=\"", .{}),
+            .close_image_link => |url| try html.writer().print("\" src=\"{}\">", .{std.zig.fmtEscapes(url)}),
             .autolink => |url| try html.writer().print("<a href=\"{}\">{s}</a>", .{ std.zig.fmtEscapes(url), url }),
             .autolink_email => |email| try html.writer().print("<a href=\"mailto:{}\">{s}</a>", .{ std.zig.fmtEscapes(email), email }),
         }
@@ -41,6 +43,10 @@ pub const Event = union(enum) {
     /// Data is URL
     start_link: []const u8,
     close_link,
+
+    /// Data is URL
+    start_image_link: []const u8,
+    close_image_link: []const u8,
 
     start_paragraph,
     close_paragraph,
@@ -138,10 +144,21 @@ fn parseParagraph(allocator: std.mem.Allocator, start_cursor: Cursor) !?Parse {
                 }
             },
 
-            .exclaimation => {},
             .square_brace_close => {},
             .parenthesis_open => {},
             .parenthesis_close => {},
+            .exclaimation => {
+                if (try parseImageLink(allocator, cursor)) |link| {
+                    defer allocator.free(link.desc);
+                    try events.append(.{ .start_image_link = link.url });
+                    try events.appendSlice(link.desc);
+                    try events.append(.{ .close_image_link = link.url });
+                    cursor.token_index = link.end_index;
+                    continue;
+                } else {
+                    try events.append(.{ .text = cursor.tokenText(cursor.token_index) });
+                }
+            },
             .square_brace_open => {
                 if (try parseLink(allocator, cursor)) |link| {
                     defer allocator.free(link.desc);
@@ -177,6 +194,20 @@ fn parseParagraph(allocator: std.mem.Allocator, start_cursor: Cursor) !?Parse {
     return Parse{
         .events = events.toOwnedSlice(),
         .end_index = cursor.token_index,
+    };
+}
+
+fn parseImageLink(allocator: std.mem.Allocator, start_cursor: Cursor) anyerror!?ParseLink {
+    var cursor = start_cursor;
+
+    // Parse alt text
+    _ = cursor.eat(.exclaimation) orelse return null;
+    const link = (try parseLink(allocator, cursor)) orelse return null;
+
+    return ParseLink{
+        .url = link.url,
+        .desc = link.desc,
+        .end_index = link.end_index,
     };
 }
 
@@ -259,9 +290,20 @@ fn parseLinkText(allocator: std.mem.Allocator, start_cursor: Cursor) anyerror!?P
                 }
             },
 
-            .exclaimation => {},
             .parenthesis_open => {},
             .parenthesis_close => {},
+            .exclaimation => {
+                if (try parseImageLink(allocator, cursor)) |link| {
+                    defer allocator.free(link.desc);
+                    try events.append(.{ .start_image_link = link.url });
+                    try events.appendSlice(link.desc);
+                    try events.append(.{ .close_image_link = link.url });
+                    cursor.token_index = link.end_index;
+                    continue;
+                } else {
+                    try events.append(.{ .text = cursor.tokenText(cursor.token_index) });
+                }
+            },
             .square_brace_open => {
                 if (try parseLink(allocator, cursor)) |link| {
                     defer allocator.free(link.desc);
