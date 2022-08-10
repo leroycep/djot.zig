@@ -29,13 +29,29 @@ pub fn parse(allocator: std.mem.Allocator, source: []const u8) ![]Event {
     defer events.deinit();
 
     try events.append(.start_paragraph);
+
+    var in_attr = false;
+    var in_comment = false;
+
     var pos: usize = 0;
     while (true) {
         const tok = nextToken(source, pos);
+        if (in_comment) {
+            if (tok.kind == .percent) {
+                in_comment = false;
+            }
+            pos = tok.end;
+            continue;
+        }
         switch (tok.kind) {
             .single_newline => {},
             .text => {
                 try events.append(.{ .text = source[tok.start..tok.end] });
+            },
+            .curly_brace_open => in_attr = true,
+            .curly_brace_close => in_attr = false,
+            .percent => if (in_attr) {
+                in_comment = true;
             },
             .double_newline => {
                 try events.append(.close_paragraph);
@@ -59,6 +75,9 @@ pub const Token = struct {
         text,
         double_newline,
         single_newline,
+        curly_brace_open,
+        curly_brace_close,
+        percent,
         eof,
     };
 };
@@ -84,10 +103,22 @@ pub fn nextToken(source: []const u8, pos: usize) Token {
         switch (state) {
             .default => switch (source[i]) {
                 '{' => {
-                    res.kind = .text;
+                    res.kind = .curly_brace_open;
                     i += 1;
                     res.end = i;
                     state = .curly_brace_open;
+                },
+                '}' => {
+                    res.kind = .curly_brace_close;
+                    i += 1;
+                    res.end = i;
+                    break;
+                },
+                '%' => {
+                    res.kind = .percent;
+                    i += 1;
+                    res.end = i;
+                    break;
                 },
                 '\n' => {
                     res.kind = .single_newline;
@@ -102,11 +133,7 @@ pub fn nextToken(source: []const u8, pos: usize) Token {
                     i += 1;
                     state = .comment;
                 },
-                else => {
-                    res.kind = .text;
-                    i += 1;
-                    res.end = i;
-                },
+                else => break,
             },
             .comment => {
                 if (source[i] == '%') state = .comment_percent;
@@ -123,7 +150,7 @@ pub fn nextToken(source: []const u8, pos: usize) Token {
                 }
             },
             .text => switch (source[i]) {
-                '{', '\n' => break,
+                '{', '\n', '}', '%' => break,
                 else => {
                     res.kind = .text;
                     i += 1;
