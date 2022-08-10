@@ -17,30 +17,67 @@ pub fn main() !void {
         test_sources[i] = try cwd.readFileAlloc(arena.allocator(), test_filepath, 50 * 1024);
     }
 
-    var tests = std.ArrayList(Test).init(arena.allocator());
-    for (test_sources) |source| {
-        try tests.appendSlice(try extractTests(arena.allocator(), source));
+    var tests = std.StringArrayHashMap([]Test).init(arena.allocator());
+    for (test_sources) |source, i| {
+        const old_value = try tests.fetchPut(test_files[i], try extractTests(arena.allocator(), source));
+        if (old_value != null) {
+            std.debug.print("test file \"{}\" specified multiple times!\n", .{std.zig.fmtEscapes(test_files[0])});
+        }
     }
 
-    var failed_tests: usize = 0;
-    for (tests.items) |test_case, i| {
-        var test_allocator = std.heap.GeneralPurposeAllocator(.{}){
-            .backing_allocator = gpa.allocator(),
+    const PassFail = struct {
+        pass: usize,
+        fail: usize,
+    };
+
+    // Number of tests passed or failed for each file
+    var tests_pass_fail = std.StringArrayHashMap(PassFail).init(arena.allocator());
+
+    var test_cases_file_iter = tests.iterator();
+    while (test_cases_file_iter.next()) |file_entry| {
+        var num = PassFail{
+            .pass = 0,
+            .fail = 0,
         };
-        if (testDjotToHtml(test_allocator.allocator(), test_case)) {} else |err| {
-            failed_tests += 1;
-            std.debug.print("test {} failed: {}\n```\n{s}\n.\n{s}\n```\n", .{ i, err, test_case.djot, test_case.html });
+        for (file_entry.value_ptr.*) |test_case, i| {
+            var test_allocator = std.heap.GeneralPurposeAllocator(.{}){
+                .backing_allocator = gpa.allocator(),
+            };
+            if (testDjotToHtml(test_allocator.allocator(), test_case)) {
+                num.pass += 1;
+            } else |err| {
+                num.fail += 1;
+                std.debug.print("test {} failed: {}\n```\n{s}\n.\n{s}\n```\n", .{ i, err, test_case.djot, test_case.html });
+            }
+            if (test_allocator.deinit()) {
+                std.debug.print("test {} leaked memory:\n```\n{s}\n.\n{s}\n```\n", .{ i, test_case.djot, test_case.html });
+            }
         }
-        if (test_allocator.deinit()) {
-            std.debug.print("test {} leaked memory:\n```\n{s}\n.\n{s}\n```\n", .{ i, test_case.djot, test_case.html });
-        }
+        try tests_pass_fail.putNoClobber(file_entry.key_ptr.*, num);
+    }
+
+    var total = PassFail{
+        .pass = 0,
+        .fail = 0,
+    };
+
+    var pass_fail_iter = tests_pass_fail.iterator();
+    while (pass_fail_iter.next()) |file_entry| {
+        total.pass += file_entry.value_ptr.pass;
+        total.fail += file_entry.value_ptr.fail;
+        std.debug.print("[{: >2}/{: >2}/{: >2}] {s}\n", .{
+            file_entry.value_ptr.pass,
+            file_entry.value_ptr.fail,
+            file_entry.value_ptr.pass + file_entry.value_ptr.fail,
+            file_entry.key_ptr.*,
+        });
     }
 
     std.debug.print(
         \\Ran {} tests.
         \\{} tests passed.
         \\{} tests failed.
-    , .{ tests.items.len, tests.items.len - failed_tests, failed_tests });
+    , .{ total.pass + total.fail, total.pass, total.fail });
 }
 
 pub fn testDjotToHtml(allocator: std.mem.Allocator, test_case: Test) !void {
