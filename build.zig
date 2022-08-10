@@ -42,29 +42,34 @@ fn buildDjotHtmlTests(b: *std.build.Builder, target: std.zig.CrossTarget, mode: 
     exe.addPackagePath("djot", "src/djot.zig");
 
     const run_cmd = exe.run();
-    run_cmd.addFileSourceArg(.{ .path = "djot/test/attributes.test" });
-    run_cmd.addFileSourceArg(.{ .path = "djot/test/blockquote.test" });
-    run_cmd.addFileSourceArg(.{ .path = "djot/test/code_blocks.test" });
-    run_cmd.addFileSourceArg(.{ .path = "djot/test/definition-lists.test" });
-    run_cmd.addFileSourceArg(.{ .path = "djot/test/emoji.test" });
-    run_cmd.addFileSourceArg(.{ .path = "djot/test/emphasis.test" });
-    run_cmd.addFileSourceArg(.{ .path = "djot/test/escapes.test" });
-    run_cmd.addFileSourceArg(.{ .path = "djot/test/fenced_divs.test" });
-    run_cmd.addFileSourceArg(.{ .path = "djot/test/footnotes.test" });
-    run_cmd.addFileSourceArg(.{ .path = "djot/test/headings.test" });
-    run_cmd.addFileSourceArg(.{ .path = "djot/test/insert-delete-mark.test" });
-    run_cmd.addFileSourceArg(.{ .path = "djot/test/links_and_images.test" });
-    run_cmd.addFileSourceArg(.{ .path = "djot/test/lists.test" });
-    run_cmd.addFileSourceArg(.{ .path = "djot/test/math.test" });
-    run_cmd.addFileSourceArg(.{ .path = "djot/test/para.test" });
-    run_cmd.addFileSourceArg(.{ .path = "djot/test/raw.test" });
-    run_cmd.addFileSourceArg(.{ .path = "djot/test/smart.test" });
-    run_cmd.addFileSourceArg(.{ .path = "djot/test/spans.test" });
-    run_cmd.addFileSourceArg(.{ .path = "djot/test/super-subscript.test" });
-    run_cmd.addFileSourceArg(.{ .path = "djot/test/tables.test" });
-    run_cmd.addFileSourceArg(.{ .path = "djot/test/task_lists.test" });
-    run_cmd.addFileSourceArg(.{ .path = "djot/test/thematic_breaks.test" });
-    run_cmd.addFileSourceArg(.{ .path = "djot/test/verbatim.test" });
+
+    if (b.option([]const u8, "test-file", "Set the file for test-djot-html to use")) |test_file| {
+        run_cmd.addFileSourceArg(.{ .path = test_file });
+    } else {
+        run_cmd.addFileSourceArg(.{ .path = "djot/test/attributes.test" });
+        run_cmd.addFileSourceArg(.{ .path = "djot/test/blockquote.test" });
+        run_cmd.addFileSourceArg(.{ .path = "djot/test/code_blocks.test" });
+        run_cmd.addFileSourceArg(.{ .path = "djot/test/definition-lists.test" });
+        run_cmd.addFileSourceArg(.{ .path = "djot/test/emoji.test" });
+        run_cmd.addFileSourceArg(.{ .path = "djot/test/emphasis.test" });
+        run_cmd.addFileSourceArg(.{ .path = "djot/test/escapes.test" });
+        run_cmd.addFileSourceArg(.{ .path = "djot/test/fenced_divs.test" });
+        run_cmd.addFileSourceArg(.{ .path = "djot/test/footnotes.test" });
+        run_cmd.addFileSourceArg(.{ .path = "djot/test/headings.test" });
+        run_cmd.addFileSourceArg(.{ .path = "djot/test/insert-delete-mark.test" });
+        run_cmd.addFileSourceArg(.{ .path = "djot/test/links_and_images.test" });
+        run_cmd.addFileSourceArg(.{ .path = "djot/test/lists.test" });
+        run_cmd.addFileSourceArg(.{ .path = "djot/test/math.test" });
+        run_cmd.addFileSourceArg(.{ .path = "djot/test/para.test" });
+        run_cmd.addFileSourceArg(.{ .path = "djot/test/raw.test" });
+        run_cmd.addFileSourceArg(.{ .path = "djot/test/smart.test" });
+        run_cmd.addFileSourceArg(.{ .path = "djot/test/spans.test" });
+        run_cmd.addFileSourceArg(.{ .path = "djot/test/super-subscript.test" });
+        run_cmd.addFileSourceArg(.{ .path = "djot/test/tables.test" });
+        run_cmd.addFileSourceArg(.{ .path = "djot/test/task_lists.test" });
+        run_cmd.addFileSourceArg(.{ .path = "djot/test/thematic_breaks.test" });
+        run_cmd.addFileSourceArg(.{ .path = "djot/test/verbatim.test" });
+    }
 
     const run_step = b.step("test-djot-html", "Run the tests from github:jgm/djot");
     run_step.dependOn(&run_cmd.step);
