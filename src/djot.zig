@@ -17,20 +17,10 @@ pub fn toHtml(allocator: std.mem.Allocator, source: []const u8) ![]const u8 {
                 try html.appendSlice(verbatim);
                 try html.appendSlice("</code>");
             },
-            .autolink => |url| {
-                try html.appendSlice("<a href=\"");
-                try html.appendSlice(url);
-                try html.appendSlice("\">");
-                try html.appendSlice(url);
-                try html.appendSlice("</a>");
-            },
-            .autolink_email => |email| {
-                try html.appendSlice("<a href=\"mailto:");
-                try html.appendSlice(email);
-                try html.appendSlice("\">");
-                try html.appendSlice(email);
-                try html.appendSlice("</a>");
-            },
+            .start_link => |url| try html.writer().print("<a href=\"{}\">", .{std.zig.fmtEscapes(url)}),
+            .close_link => try html.appendSlice("</a>"),
+            .autolink => |url| try html.writer().print("<a href=\"{}\">{s}</a>", .{ std.zig.fmtEscapes(url), url }),
+            .autolink_email => |email| try html.writer().print("<a href=\"mailto:{}\">{s}</a>", .{ std.zig.fmtEscapes(email), email }),
         }
     }
 
@@ -48,31 +38,58 @@ pub const Event = union(enum) {
     /// Data is email address
     autolink_email: []const u8,
 
+    /// Data is URL
+    start_link: []const u8,
+    close_link,
+
     start_paragraph,
     close_paragraph,
 };
 
 pub fn parse(allocator: std.mem.Allocator, source: []const u8) ![]Event {
+    var token_starts = std.ArrayList(u32).init(allocator);
+    var token_kinds = std.ArrayList(Token.Kind).init(allocator);
+    defer {
+        token_kinds.deinit();
+        token_starts.deinit();
+    }
+
+    {
+        var pos: usize = 0;
+        while (true) {
+            const tok = nextToken(source, pos);
+            try token_starts.append(@intCast(u32, tok.start));
+            try token_kinds.append(tok.kind);
+            if (tok.kind == .eof) {
+                break;
+            }
+            pos = tok.end;
+        }
+    }
+
+    var cursor = Cursor{
+        .source = source,
+        .token_starts = token_starts.items,
+        .token_kinds = token_kinds.items,
+        .token_index = 0,
+    };
+
     var events = std.ArrayList(Event).init(allocator);
     defer events.deinit();
-
-    var pos: usize = 0;
     while (true) {
-        if (try parseParagraph(allocator, source, pos)) |paragraph| {
+        if (try parseParagraph(allocator, cursor)) |paragraph| {
             defer allocator.free(paragraph.events);
             try events.append(.start_paragraph);
             try events.appendSlice(paragraph.events);
             try events.append(.close_paragraph);
-            pos = paragraph.end_pos;
+            cursor.token_index = paragraph.end_index;
             continue;
         }
-        const tok = nextToken(source, pos);
-        switch (tok.kind) {
-            .double_newline => {},
+        switch (cursor.token_kinds[cursor.token_index]) {
+            .double_newline => cursor.token_index += 1,
             .eof => break,
             else => return error.TODO,
         }
-        pos = tok.end;
     }
 
     return events.toOwnedSlice();
@@ -80,164 +97,266 @@ pub fn parse(allocator: std.mem.Allocator, source: []const u8) ![]Event {
 
 const Parse = struct {
     events: []Event,
-    end_pos: usize,
+    end_index: Cursor.TokenIndex,
 };
 
-fn parseParagraph(allocator: std.mem.Allocator, source: []const u8, start_pos: usize) !?Parse {
-    var pos = start_pos;
+fn parseParagraph(allocator: std.mem.Allocator, start_cursor: Cursor) !?Parse {
+    var cursor = start_cursor;
     var events = std.ArrayList(Event).init(allocator);
     defer events.deinit();
 
-    switch (nextToken(source, start_pos).kind) {
+    switch (cursor.token_kinds[cursor.token_index]) {
         .eof, .double_newline => return null,
         else => {},
     }
 
     var in_attr = false;
-    var in_comment = false;
 
     while (true) {
-        const tok = nextToken(source, pos);
-        if (in_comment) {
-            if (tok.kind == .percent) {
-                in_comment = false;
-            }
-            pos = tok.end;
-            continue;
-        }
-        switch (tok.kind) {
+        switch (cursor.token_kinds[cursor.token_index]) {
             .text,
             .spaces,
-            => try events.append(.{ .text = source[tok.start..tok.end] }),
+            => try events.append(.{ .text = cursor.tokenText(cursor.token_index) }),
 
-            .single_newline => switch (nextToken(source, tok.end).kind) {
+            .single_newline => switch (cursor.token_kinds[cursor.token_index + 1]) {
                 .single_newline => unreachable,
 
                 .eof,
                 .double_newline,
                 => {},
 
-                else => {
-                    try events.append(.{ .text = source[tok.start..tok.end] });
-                },
+                else => try events.append(.{ .text = cursor.tokenText(cursor.token_index) }),
             },
 
             .autolink => {
-                if (try parseAutoLink(source, pos)) |autolink| {
+                if (try parseAutoLink(cursor)) |autolink| {
                     try events.append(autolink.event);
-                    pos = autolink.end_pos;
+                    cursor.token_index = autolink.end_index;
                     continue;
                 } else {
-                    try events.append(.{ .text = source[tok.start..tok.end] });
+                    return error.AutoLinkWasntAutoLink;
+                }
+            },
+
+            .exclaimation => {},
+            .square_brace_close => {},
+            .parenthesis_open => {},
+            .parenthesis_close => {},
+            .square_brace_open => {
+                if (try parseLink(allocator, cursor)) |link| {
+                    defer allocator.free(link.desc);
+                    try events.append(.{ .start_link = link.url });
+                    try events.appendSlice(link.desc);
+                    cursor.token_index = link.end_index;
+                    continue;
+                } else {
+                    try events.append(.{ .text = cursor.tokenText(cursor.token_index) });
                 }
             },
 
             .curly_brace_open => in_attr = true,
             .curly_brace_close => in_attr = false,
             .percent => if (in_attr) {
-                in_comment = true;
+                _ = cursor.until(.percent) orelse return error.UnclosedComment;
             },
             .ticks => {
-                if (try parseVerbatim(allocator, source, pos)) |verbatim| {
+                if (parseVerbatim(cursor)) |verbatim| {
                     try events.append(.{ .verbatim_inline = verbatim.text });
-                    pos = verbatim.end_pos;
+                    cursor.token_index = verbatim.end_index;
                     continue;
                 } else {
-                    try events.append(.{ .text = source[tok.start..tok.end] });
+                    return error.Unknown;
                 }
             },
             .double_newline, .eof => break,
         }
-        pos = tok.end;
+        cursor.token_index += 1;
     }
 
     return Parse{
         .events = events.toOwnedSlice(),
-        .end_pos = pos,
+        .end_index = cursor.token_index,
+    };
+}
+
+const ParseLink = struct {
+    url: []const u8,
+    desc: []Event,
+    end_index: Cursor.TokenIndex,
+};
+
+fn parseLink(allocator: std.mem.Allocator, start_cursor: Cursor) !?ParseLink {
+    var cursor = start_cursor;
+
+    // Parse hyperlink text
+    _ = cursor.eat(.square_brace_open) orelse return null;
+    const desc = cursor.until(.square_brace_close) orelse return null;
+
+    // Parse hyperlink URL
+    _ = cursor.eat(.parenthesis_open) orelse return null;
+    const url_token_range = cursor.until(.parenthesis_close) orelse return null;
+
+    const url_start = cursor.token_starts[url_token_range[0]];
+    const url_end = cursor.tokenAt(url_token_range[1] - 1).end;
+
+    var events = std.ArrayList(Event).init(allocator);
+    defer events.deinit();
+
+    var i = desc[0];
+    while (i < desc[1] - 1) : (i += 1) {
+        switch (cursor.token_kinds[i]) {
+            .text => try events.append(.{ .text = cursor.tokenText(i) }),
+            else => try events.append(.{ .text = cursor.tokenText(i) }),
+        }
+    }
+
+    std.debug.print("{s}:{}\n", .{ @src().fn_name, @src().line });
+
+    return ParseLink{
+        .url = cursor.source[url_start..url_end],
+        .desc = events.toOwnedSlice(),
+        .end_index = cursor.token_index,
     };
 }
 
 const ParseAutoLink = struct {
     event: Event,
-    end_pos: usize,
+    end_index: u32,
 };
 
-fn parseAutoLink(source: []const u8, start_pos: usize) !?ParseAutoLink {
-    const tok = nextToken(source, start_pos);
-    if (tok.kind != .autolink) {
-        return null;
-    }
+fn parseAutoLink(start_cursor: Cursor) !?ParseAutoLink {
+    var cursor = start_cursor;
 
-    const link_text = source[tok.start + 1 .. tok.end - 1];
+    const tok_i = cursor.eat(.autolink) orelse return null;
+
+    const autolink_text = cursor.tokenText(tok_i);
+    const link_text = autolink_text[1 .. autolink_text.len - 1];
 
     if (std.mem.containsAtLeast(u8, link_text, 1, "@")) {
         return ParseAutoLink{
             .event = .{ .autolink_email = link_text },
-            .end_pos = tok.end,
+            .end_index = cursor.token_index,
         };
     }
 
     return ParseAutoLink{
         .event = .{ .autolink = link_text },
-        .end_pos = tok.end,
+        .end_index = cursor.token_index,
     };
 }
 
 const Verbatim = struct {
     text: []const u8,
-    end_pos: usize,
+    end_index: Cursor.TokenIndex,
 };
 
-fn parseVerbatim(allocator: std.mem.Allocator, source: []const u8, start_pos: usize) !?Verbatim {
-    var pos = start_pos;
-    const opener = switch (nextToken(source, start_pos).kind) {
-        .ticks => nextToken(source, start_pos),
-        else => return null,
-    };
+fn parseVerbatim(start_cursor: Cursor) ?Verbatim {
+    var cursor = start_cursor;
 
-    pos = opener.end;
+    const opener_tok_i = cursor.eat(.ticks) orelse return null;
+    const opener_text = cursor.tokenText(opener_tok_i);
+
+    const content_start = cursor.token_index;
 
     // Find end of verbatim and get list of tokens that are easier to manipulate than raw `nextToken` calls
-    var tokens = std.ArrayList(Token).init(allocator);
-    defer tokens.deinit();
-    while (true) {
-        const tok = nextToken(source, pos);
-
-        if (tok.kind == .eof) {
+    var content_end = content_start;
+    while (content_end < cursor.token_kinds.len) : (content_end += 1) {
+        if (cursor.token_kinds[content_end] == .eof) return null;
+        if (std.mem.eql(u8, cursor.tokenText(content_end), opener_text)) {
+            cursor.token_index = content_end;
             break;
         }
-        if (std.mem.eql(u8, source[tok.start..tok.end], source[opener.start..opener.end])) {
-            pos = tok.end;
-            break;
-        }
-
-        try tokens.append(tok);
-        pos = tok.end;
-    }
+    } else unreachable;
 
     // Check if content begins or ends with a tick
     const content_has_ticks = blk: {
-        if (tokens.items.len > 0 and tokens.items[0].kind == .ticks) break :blk true;
-        if (tokens.items.len > 1 and tokens.items[0].kind == .spaces and tokens.items[1].kind == .ticks) break :blk true;
+        if (cursor.token_kinds[content_start] == .ticks) break :blk true;
+        if (cursor.token_kinds[content_start] == .spaces and cursor.token_kinds[content_start + 1] == .ticks) break :blk true;
 
-        const end = tokens.items.len -| 1;
-        if (tokens.items.len > 0 and tokens.items[end].kind == .ticks) break :blk true;
-        if (tokens.items.len > 1 and tokens.items[end].kind == .spaces and tokens.items[end - 1].kind == .ticks) break :blk true;
+        if (cursor.token_kinds[content_end - 1] == .ticks) break :blk true;
+        if (cursor.token_kinds[content_end - 1] == .spaces and cursor.token_kinds[content_end - 2] == .ticks) break :blk true;
 
         break :blk false;
     };
 
-    const span_starts_with_spaces = tokens.items.len > 0 and tokens.items[0].kind == .spaces;
-    const span_ends_with_spaces = tokens.items.len > 1 and tokens.items[tokens.items.len - 1].kind == .spaces;
+    const span_starts_with_spaces = content_end - content_start > 0 and cursor.token_kinds[content_start] == .spaces;
+    const span_ends_with_spaces = content_end - content_start > 1 and cursor.token_kinds[content_end - 1] == .spaces;
 
-    const verbatim_start = if (content_has_ticks and span_starts_with_spaces) tokens.items[0].start + 1 else tokens.items[0].start;
-    const verbatim_end = if (content_has_ticks and span_ends_with_spaces) tokens.items[tokens.items.len - 1].end - 1 else tokens.items[tokens.items.len - 1].end;
+    const verbatim_start = if (content_has_ticks and span_starts_with_spaces) cursor.token_starts[content_start] + 1 else cursor.token_starts[content_start];
+    const verbatim_end = if (content_has_ticks and span_ends_with_spaces) cursor.tokenAt(content_end - 1).end - 1 else cursor.tokenAt(content_end - 1).end;
 
     return Verbatim{
-        .text = std.mem.trimRight(u8, source[verbatim_start..verbatim_end], "\n"),
-        .end_pos = pos,
+        .text = std.mem.trimRight(u8, cursor.source[verbatim_start..verbatim_end], "\n"),
+        .end_index = cursor.token_index,
     };
 }
+
+pub const Cursor = struct {
+    source: []const u8,
+    token_kinds: []const Token.Kind,
+    token_starts: []const u32,
+    token_index: u32,
+
+    const TokenIndex = u32;
+
+    /// Only returns the token if the expected_kind matches
+    pub fn eat(this: *@This(), expected_kind: Token.Kind) ?TokenIndex {
+        if (this.token_index >= this.token_kinds.len) return null;
+        if (this.token_kinds[this.token_index] == expected_kind) {
+            defer this.token_index += 1;
+            return this.token_index;
+        }
+        return null;
+    }
+
+    /// Returns a range containing all tokens between the current index and expected token kind.
+    ///
+    /// - Includes the Token with the expected kind
+    /// - If expected kind is not found, returns null.
+    pub fn until(this: *@This(), expected_kind: Token.Kind) ?[2]TokenIndex {
+        const start = this.token_index;
+        while (this.token_index < this.token_kinds.len - 1 and this.token_kinds[this.token_index] != expected_kind) : (this.token_index += 1) {}
+        if (this.token_kinds[this.token_index] != expected_kind) {
+            return null;
+        }
+        return [2]TokenIndex{ start, this.token_index };
+    }
+
+    pub fn next(this: *@This()) TokenIndex {
+        if (this.token_index >= this.token_kinds.len) {
+            const last = @intCast(u32, this.token_kinds.len - 1);
+            std.debug.assert(this.token_kinds[last] == .eof);
+            return last;
+        }
+        defer this.token_index += 1;
+        return this.token_index;
+    }
+
+    pub fn tokenAt(this: @This(), index: TokenIndex) Token {
+        if (index >= this.token_kinds.len) {
+            const last = this.token_kinds.len - 1;
+            std.debug.assert(this.token_kinds[last] == .eof);
+            return nextToken(this.source, this.token_starts[last]);
+        }
+        return nextToken(this.source, this.token_starts[index]);
+    }
+
+    pub fn tokenText(this: @This(), index: TokenIndex) []const u8 {
+        if (index >= this.token_kinds.len) {
+            return this.source[this.source.len..];
+        }
+        const tok = nextToken(this.source, this.token_starts[index]);
+        return this.source[tok.start..tok.end];
+    }
+
+    pub fn end(this: @This()) usize {
+        if (this.token_index >= this.token_kinds.len) {
+            return this.source.len;
+        }
+        const tok = nextToken(this.source, this.token_starts[this.token_index]);
+        return tok.end;
+    }
+};
 
 pub const Token = struct {
     start: usize,
@@ -254,6 +373,13 @@ pub const Token = struct {
         percent,
         ticks,
         autolink,
+
+        exclaimation,
+        square_brace_open,
+        square_brace_close,
+        parenthesis_open,
+        parenthesis_close,
+
         eof,
     };
 };
@@ -287,14 +413,24 @@ pub fn nextToken(source: []const u8, pos: usize) Token {
                     res.end = i;
                     state = .curly_brace_open;
                 },
-                '}' => {
-                    res.kind = .curly_brace_close;
-                    i += 1;
-                    res.end = i;
-                    break;
-                },
-                '%' => {
-                    res.kind = .percent;
+                '}',
+                '%',
+                '!',
+                '[',
+                ']',
+                '(',
+                ')',
+                => {
+                    res.kind = switch (source[i]) {
+                        '}' => .curly_brace_close,
+                        '%' => .percent,
+                        '!' => .exclaimation,
+                        '[' => .square_brace_open,
+                        ']' => .square_brace_close,
+                        '(' => .parenthesis_open,
+                        ')' => .parenthesis_close,
+                        else => unreachable,
+                    };
                     i += 1;
                     res.end = i;
                     break;
@@ -352,6 +488,11 @@ pub fn nextToken(source: []const u8, pos: usize) Token {
                 '}',
                 '%',
                 '`',
+                '!',
+                '[',
+                ']',
+                '(',
+                ')',
                 => break,
                 else => {
                     res.kind = .text;

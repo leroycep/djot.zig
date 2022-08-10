@@ -47,10 +47,10 @@ pub fn main() !void {
                 num.pass += 1;
             } else |err| {
                 num.fail += 1;
-                std.debug.print("test {} failed: {}\n```\n{s}\n.\n{s}\n```\n", .{ i, err, test_case.djot, test_case.html });
+                std.debug.print("test {} failed: {}\n```\n{s}\n```\n\n", .{ i, err, test_case.djot });
             }
             if (test_allocator.deinit()) {
-                std.debug.print("test {} leaked memory:\n```\n{s}\n.\n{s}\n```\n", .{ i, test_case.djot, test_case.html });
+                std.debug.print("test {} leaked memory\n\n", .{i});
             }
         }
         try tests_pass_fail.putNoClobber(file_entry.key_ptr.*, num);
