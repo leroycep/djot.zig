@@ -17,6 +17,20 @@ pub fn toHtml(allocator: std.mem.Allocator, source: []const u8) ![]const u8 {
                 try html.appendSlice(verbatim);
                 try html.appendSlice("</code>");
             },
+            .autolink => |url| {
+                try html.appendSlice("<a href=\"");
+                try html.appendSlice(url);
+                try html.appendSlice("\">");
+                try html.appendSlice(url);
+                try html.appendSlice("</a>");
+            },
+            .autolink_email => |email| {
+                try html.appendSlice("<a href=\"mailto:");
+                try html.appendSlice(email);
+                try html.appendSlice("\">");
+                try html.appendSlice(email);
+                try html.appendSlice("</a>");
+            },
         }
     }
 
@@ -27,6 +41,12 @@ pub const Event = union(enum) {
     newline,
     text: []const u8,
     verbatim_inline: []const u8,
+
+    /// Data is URL
+    autolink: []const u8,
+
+    /// Data is email address
+    autolink_email: []const u8,
 
     start_paragraph,
     close_paragraph,
@@ -86,10 +106,32 @@ fn parseParagraph(allocator: std.mem.Allocator, source: []const u8, start_pos: u
             continue;
         }
         switch (tok.kind) {
-            .single_newline => {},
             .text,
             .spaces,
             => try events.append(.{ .text = source[tok.start..tok.end] }),
+
+            .single_newline => switch (nextToken(source, tok.end).kind) {
+                .single_newline => unreachable,
+
+                .eof,
+                .double_newline,
+                => {},
+
+                else => {
+                    try events.append(.{ .text = source[tok.start..tok.end] });
+                },
+            },
+
+            .autolink => {
+                if (try parseAutoLink(source, pos)) |autolink| {
+                    try events.append(autolink.event);
+                    pos = autolink.end_pos;
+                    continue;
+                } else {
+                    try events.append(.{ .text = source[tok.start..tok.end] });
+                }
+            },
+
             .curly_brace_open => in_attr = true,
             .curly_brace_close => in_attr = false,
             .percent => if (in_attr) {
@@ -112,6 +154,32 @@ fn parseParagraph(allocator: std.mem.Allocator, source: []const u8, start_pos: u
     return Parse{
         .events = events.toOwnedSlice(),
         .end_pos = pos,
+    };
+}
+
+const ParseAutoLink = struct {
+    event: Event,
+    end_pos: usize,
+};
+
+fn parseAutoLink(source: []const u8, start_pos: usize) !?ParseAutoLink {
+    const tok = nextToken(source, start_pos);
+    if (tok.kind != .autolink) {
+        return null;
+    }
+
+    const link_text = source[tok.start + 1 .. tok.end - 1];
+
+    if (std.mem.containsAtLeast(u8, link_text, 1, "@")) {
+        return ParseAutoLink{
+            .event = .{ .autolink_email = link_text },
+            .end_pos = tok.end,
+        };
+    }
+
+    return ParseAutoLink{
+        .event = .{ .autolink = link_text },
+        .end_pos = tok.end,
     };
 }
 
@@ -185,6 +253,7 @@ pub const Token = struct {
         curly_brace_close,
         percent,
         ticks,
+        autolink,
         eof,
     };
 };
@@ -199,6 +268,7 @@ pub fn nextToken(source: []const u8, pos: usize) Token {
         newline,
         ticks,
         spaces,
+        autolink,
     };
 
     var res = Token{
@@ -246,6 +316,12 @@ pub fn nextToken(source: []const u8, pos: usize) Token {
                     i += 1;
                     res.end = i;
                     state = .spaces;
+                },
+                '<' => {
+                    res.kind = .autolink;
+                    i += 1;
+                    res.end = i;
+                    state = .autolink;
                 },
                 else => state = .text,
             },
@@ -305,6 +381,22 @@ pub fn nextToken(source: []const u8, pos: usize) Token {
                     res.end = i;
                 },
                 else => break,
+            },
+            .autolink => switch (source[i]) {
+                ' ',
+                '\n',
+                '{',
+                '}',
+                '`',
+                => break,
+                '>' => {
+                    i += 1;
+                    res.end = i;
+                    break;
+                },
+                else => {
+                    i += 1;
+                },
             },
         }
     }
