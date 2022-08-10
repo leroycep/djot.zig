@@ -2,7 +2,7 @@ const std = @import("std");
 
 pub fn toHtml(allocator: std.mem.Allocator, source: []const u8) ![]const u8 {
     const events = try parse(allocator, source);
-    defer allocator.free(events);
+    defer parseFree(allocator, events);
 
     var html = std.ArrayList(u8).init(allocator);
     defer html.deinit();
@@ -19,8 +19,7 @@ pub fn toHtml(allocator: std.mem.Allocator, source: []const u8) ![]const u8 {
             },
             .start_link => |url| try html.writer().print("<a href=\"{}\">", .{std.zig.fmtEscapes(url)}),
             .close_link => try html.appendSlice("</a>"),
-            .start_image_link => try html.writer().print("<img alt=\"", .{}),
-            .close_image_link => |url| try html.writer().print("\" src=\"{}\">", .{std.zig.fmtEscapes(url)}),
+            .image => |link| try html.writer().print("<img alt=\"{}\" src=\"{}\">", .{ std.zig.fmtEscapes(link.alt), std.zig.fmtEscapes(link.src) }),
             .autolink => |url| try html.writer().print("<a href=\"{}\">{s}</a>", .{ std.zig.fmtEscapes(url), url }),
             .autolink_email => |email| try html.writer().print("<a href=\"mailto:{}\">{s}</a>", .{ std.zig.fmtEscapes(email), email }),
         }
@@ -45,13 +44,19 @@ pub const Event = union(enum) {
     close_link,
 
     /// Data is URL
-    start_image_link: []const u8,
-    close_image_link: []const u8,
+    image: struct {
+        /// Alt-Text
+        alt: []const u8,
+
+        /// URL pointing to image
+        src: []const u8,
+    },
 
     start_paragraph,
     close_paragraph,
 };
 
+/// The returned events must be freed with `parseFree`
 pub fn parse(allocator: std.mem.Allocator, source: []const u8) ![]Event {
     var token_starts = std.ArrayList(u32).init(allocator);
     var token_kinds = std.ArrayList(Token.Kind).init(allocator);
@@ -99,6 +104,16 @@ pub fn parse(allocator: std.mem.Allocator, source: []const u8) ![]Event {
     }
 
     return events.toOwnedSlice();
+}
+
+pub fn parseFree(allocator: std.mem.Allocator, events: []const Event) void {
+    for (events) |event| {
+        switch (event) {
+            .image => |img| allocator.free(img.alt),
+            else => {},
+        }
+    }
+    allocator.free(events);
 }
 
 const Parse = struct {
@@ -149,10 +164,10 @@ fn parseParagraph(allocator: std.mem.Allocator, start_cursor: Cursor) !?Parse {
             .parenthesis_close => {},
             .exclaimation => {
                 if (try parseImageLink(allocator, cursor)) |link| {
-                    defer allocator.free(link.desc);
-                    try events.append(.{ .start_image_link = link.url });
-                    try events.appendSlice(link.desc);
-                    try events.append(.{ .close_image_link = link.url });
+                    try events.append(.{ .image = .{
+                        .src = link.url,
+                        .alt = link.alt_text,
+                    } });
                     cursor.token_index = link.end_index;
                     continue;
                 } else {
@@ -197,16 +212,34 @@ fn parseParagraph(allocator: std.mem.Allocator, start_cursor: Cursor) !?Parse {
     };
 }
 
-fn parseImageLink(allocator: std.mem.Allocator, start_cursor: Cursor) anyerror!?ParseLink {
+const ParseImageLink = struct {
+    alt_text: []const u8,
+    url: []const u8,
+    end_index: Cursor.TokenIndex,
+};
+
+fn parseImageLink(allocator: std.mem.Allocator, start_cursor: Cursor) anyerror!?ParseImageLink {
     var cursor = start_cursor;
 
     // Parse alt text
     _ = cursor.eat(.exclaimation) orelse return null;
     const link = (try parseLink(allocator, cursor)) orelse return null;
+    defer parseFree(allocator, link.desc);
 
-    return ParseLink{
+    var alt_text = std.ArrayList(u8).init(allocator);
+    defer alt_text.deinit();
+
+    for (link.desc) |event| {
+        switch (event) {
+            .text => |t| try alt_text.appendSlice(t),
+            .verbatim_inline => |verbatim| try alt_text.appendSlice(verbatim),
+            else => {},
+        }
+    }
+
+    return ParseImageLink{
+        .alt_text = alt_text.toOwnedSlice(),
         .url = link.url,
-        .desc = link.desc,
         .end_index = link.end_index,
     };
 }
@@ -294,10 +327,10 @@ fn parseLinkText(allocator: std.mem.Allocator, start_cursor: Cursor) anyerror!?P
             .parenthesis_close => {},
             .exclaimation => {
                 if (try parseImageLink(allocator, cursor)) |link| {
-                    defer allocator.free(link.desc);
-                    try events.append(.{ .start_image_link = link.url });
-                    try events.appendSlice(link.desc);
-                    try events.append(.{ .close_image_link = link.url });
+                    try events.append(.{ .image = .{
+                        .src = link.url,
+                        .alt = link.alt_text,
+                    } });
                     cursor.token_index = link.end_index;
                     continue;
                 } else {
