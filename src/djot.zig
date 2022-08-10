@@ -165,7 +165,7 @@ fn parseParagraph(allocator: std.mem.Allocator, start_cursor: Cursor) !?Parse {
                     cursor.token_index = verbatim.end_index;
                     continue;
                 } else {
-                    return error.Unknown;
+                    try events.append(.{ .text = cursor.tokenText(cursor.token_index) });
                 }
             },
             .double_newline, .eof => break,
@@ -261,9 +261,12 @@ fn parseVerbatim(start_cursor: Cursor) ?Verbatim {
     // Find end of verbatim and get list of tokens that are easier to manipulate than raw `nextToken` calls
     var content_end = content_start;
     while (content_end < cursor.token_kinds.len) : (content_end += 1) {
-        if (cursor.token_kinds[content_end] == .eof) return null;
-        if (std.mem.eql(u8, cursor.tokenText(content_end), opener_text)) {
+        if (cursor.token_kinds[content_end] == .eof) {
             cursor.token_index = content_end;
+            break;
+        }
+        if (std.mem.eql(u8, cursor.tokenText(content_end), opener_text)) {
+            cursor.token_index = content_end + 1;
             break;
         }
     } else unreachable;
