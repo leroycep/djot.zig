@@ -10,6 +10,12 @@ pub fn toHtml(allocator: std.mem.Allocator, source: []const u8) ![]const u8 {
         switch (event) {
             .text => |t| try html.appendSlice(t),
             .newline => try html.appendSlice("\n"),
+            .character => |char| {
+                const nbytes = try std.unicode.utf8CodepointSequenceLength(char);
+                try html.appendNTimes(undefined, nbytes);
+                const nbytes_written = try std.unicode.utf8Encode(char, html.items[html.items.len - nbytes ..]);
+                std.debug.assert(nbytes_written == nbytes);
+            },
             .start_paragraph => try html.appendSlice("<p>"),
             .close_paragraph => try html.appendSlice("</p>\n"),
             .verbatim_inline => |verbatim| {
@@ -17,7 +23,7 @@ pub fn toHtml(allocator: std.mem.Allocator, source: []const u8) ![]const u8 {
                 try html.appendSlice(verbatim);
                 try html.appendSlice("</code>");
             },
-            .start_link => |url| try html.writer().print("<a href=\"{}\">", .{std.zig.fmtEscapes(url)}),
+            .start_link => |url| try html.writer().print("<a href=\"{s}\">", .{url}),
             .close_link => try html.appendSlice("</a>"),
             .image => |link| try html.writer().print("<img alt=\"{}\" src=\"{}\">", .{ std.zig.fmtEscapes(link.alt), std.zig.fmtEscapes(link.src) }),
             .autolink => |url| try html.writer().print("<a href=\"{}\">{s}</a>", .{ std.zig.fmtEscapes(url), url }),
@@ -30,6 +36,7 @@ pub fn toHtml(allocator: std.mem.Allocator, source: []const u8) ![]const u8 {
 
 pub const Event = union(enum) {
     newline,
+    character: u21,
     text: []const u8,
     verbatim_inline: []const u8,
 
@@ -135,9 +142,16 @@ fn parseParagraph(allocator: std.mem.Allocator, start_cursor: Cursor) !?Parse {
 
     while (true) {
         switch (cursor.token_kinds[cursor.token_index]) {
+            .double_newline, .eof => break,
+
             .text,
             .spaces,
+            .square_brace_close,
+            .parenthesis_open,
+            .parenthesis_close,
             => try events.append(.{ .text = cursor.tokenText(cursor.token_index) }),
+
+            .escape => try events.append(.{ .character = cursor.tokenText(cursor.token_index)[1..][0] }),
 
             .single_newline => switch (cursor.token_kinds[cursor.token_index + 1]) {
                 .single_newline => unreachable,
@@ -159,9 +173,6 @@ fn parseParagraph(allocator: std.mem.Allocator, start_cursor: Cursor) !?Parse {
                 }
             },
 
-            .square_brace_close => {},
-            .parenthesis_open => {},
-            .parenthesis_close => {},
             .exclaimation => {
                 if (try parseImageLink(allocator, cursor)) |link| {
                     try events.append(.{ .image = .{
@@ -201,7 +212,6 @@ fn parseParagraph(allocator: std.mem.Allocator, start_cursor: Cursor) !?Parse {
                     try events.append(.{ .text = cursor.tokenText(cursor.token_index) });
                 }
             },
-            .double_newline, .eof => break,
         }
         cursor.token_index += 1;
     }
@@ -265,7 +275,7 @@ fn parseLink(allocator: std.mem.Allocator, start_cursor: Cursor) anyerror!?Parse
     const url_token_range = cursor.until(.parenthesis_close) orelse return null;
 
     const url_start = cursor.token_starts[url_token_range[0]];
-    const url_end = cursor.tokenAt(url_token_range[1] - 1).end;
+    const url_end = cursor.tokenAt(url_token_range[1] - 2).end;
 
     return ParseLink{
         .url = cursor.source[url_start..url_end],
@@ -301,7 +311,11 @@ fn parseLinkText(allocator: std.mem.Allocator, start_cursor: Cursor) anyerror!?P
 
             .text,
             .spaces,
+            .parenthesis_open,
+            .parenthesis_close,
             => try events.append(.{ .text = cursor.tokenText(cursor.token_index) }),
+
+            .escape => try events.append(.{ .character = cursor.tokenText(cursor.token_index)[1..][0] }),
 
             .single_newline => switch (cursor.token_kinds[cursor.token_index + 1]) {
                 .single_newline => unreachable,
@@ -323,8 +337,6 @@ fn parseLinkText(allocator: std.mem.Allocator, start_cursor: Cursor) anyerror!?P
                 }
             },
 
-            .parenthesis_open => {},
-            .parenthesis_close => {},
             .exclaimation => {
                 if (try parseImageLink(allocator, cursor)) |link| {
                     try events.append(.{ .image = .{
@@ -474,10 +486,12 @@ pub const Cursor = struct {
     pub fn until(this: *@This(), expected_kind: Token.Kind) ?[2]TokenIndex {
         const start = this.token_index;
         while (this.token_index < this.token_kinds.len - 1 and this.token_kinds[this.token_index] != expected_kind) : (this.token_index += 1) {}
-        if (this.token_kinds[this.token_index] != expected_kind) {
+        if (this.token_kinds[this.token_index] == expected_kind) {
+            this.token_index += 1;
+            return [2]TokenIndex{ start, this.token_index };
+        } else {
             return null;
         }
-        return [2]TokenIndex{ start, this.token_index };
     }
 
     pub fn next(this: *@This()) TokenIndex {
@@ -538,6 +552,8 @@ pub const Token = struct {
         parenthesis_open,
         parenthesis_close,
 
+        escape,
+
         eof,
     };
 };
@@ -553,6 +569,7 @@ pub fn nextToken(source: []const u8, pos: usize) Token {
         ticks,
         spaces,
         autolink,
+        escape,
     };
 
     var res = Token{
@@ -616,6 +633,12 @@ pub fn nextToken(source: []const u8, pos: usize) Token {
                     i += 1;
                     res.end = i;
                     state = .autolink;
+                },
+                '\\' => {
+                    res.kind = .escape;
+                    i += 1;
+                    res.end = i;
+                    state = .escape;
                 },
                 else => state = .text,
             },
@@ -695,6 +718,13 @@ pub fn nextToken(source: []const u8, pos: usize) Token {
                 },
                 else => {
                     i += 1;
+                },
+            },
+            .escape => switch (source[i]) {
+                else => {
+                    i += 1;
+                    res.end = i;
+                    break;
                 },
             },
         }
