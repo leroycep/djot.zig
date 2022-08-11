@@ -100,7 +100,7 @@ pub fn parse(allocator: std.mem.Allocator, source: []const u8) ![]Event {
     var events = std.ArrayList(Event).init(allocator);
     defer parseFree(allocator, events.toOwnedSlice());
     while (true) {
-        if (try parseParagraph(allocator, cursor)) |paragraph| {
+        if (try parseTextSpan(allocator, cursor, null, null)) |paragraph| {
             defer allocator.free(paragraph.events);
             try events.append(.start_paragraph);
             try events.appendSlice(paragraph.events);
@@ -139,28 +139,40 @@ const Parse = struct {
     end_index: Cursor.TokenIndex,
 };
 
-fn parseParagraph(allocator: std.mem.Allocator, start_cursor: Cursor) !?Parse {
+const PrevOpener = struct {
+    prev: ?*const PrevOpener,
+    opener: Cursor.TokenIndex,
+};
+
+fn parseTextSpan(allocator: std.mem.Allocator, start_cursor: Cursor, opener: ?Cursor.TokenIndex, prev_opener: ?*const PrevOpener) anyerror!?Parse {
     var cursor = start_cursor;
 
-    switch (cursor.token_kinds[cursor.token_index]) {
-        .eof, .double_newline => return null,
-        else => {},
+    if (cursor.eat(.eof) orelse cursor.eat(.double_newline)) |_| {
+        return null;
     }
 
     var events = std.ArrayList(Event).init(allocator);
     defer parseFree(allocator, events.toOwnedSlice());
 
+    const this_prev_opener = if (opener) |o| &PrevOpener{
+        .prev = prev_opener,
+        .opener = o,
+    } else null;
+
     var in_attr = false;
 
-    while (true) {
+    text_span: while (true) {
         switch (cursor.token_kinds[cursor.token_index]) {
-            .double_newline, .eof => break,
+            .eof => if (opener == null) {
+                break;
+            } else {
+                return null;
+            },
+            .double_newline => break,
 
             .text,
             .spaces,
-            .square_brace_close,
             .parenthesis_open,
-            .parenthesis_close,
             => {},
 
             .escape => {
@@ -182,47 +194,34 @@ fn parseParagraph(allocator: std.mem.Allocator, start_cursor: Cursor) !?Parse {
                 else => {},
             },
 
-            .autolink => {
-                if (try parseAutoLink(cursor)) |autolink| {
-                    try events.append(autolink.event);
-                    cursor.token_index = autolink.end_index;
-                    continue;
-                } else {
-                    return error.AutoLinkWasntAutoLink;
-                }
+            .autolink => if (try parseAutoLink(cursor)) |autolink| {
+                try events.append(autolink.event);
+                cursor.token_index = autolink.end_index;
+                continue;
+            } else {
+                return error.AutoLinkWasntAutoLink;
             },
 
-            .exclaimation => {
-                if (try parseImageLink(allocator, cursor, null)) |link| {
-                    try events.append(.{ .image = .{
-                        .src = link.url,
-                        .alt = link.alt_text,
-                    } });
-                    cursor.token_index = link.end_index;
-                    continue;
-                }
-            },
-            .square_brace_open => {
-                if (try parseLink(allocator, cursor, null)) |link| {
-                    defer allocator.free(link.desc);
-                    try events.append(.{ .start_link = link.url });
-                    try events.appendSlice(link.desc);
-                    try events.append(.close_link);
-                    cursor.token_index = link.end_index;
-                    continue;
-                }
+            .exclaimation => if (try parseImageLink(allocator, cursor, this_prev_opener)) |link| {
+                try events.append(.{ .image = .{
+                    .src = link.url,
+                    .alt = link.alt_text,
+                } });
+                cursor.token_index = link.end_index;
+                continue;
             },
 
-            .curly_brace_open => {
-                in_attr = true;
-                cursor.increment();
+            .square_brace_open => if (try parseLink(allocator, cursor, this_prev_opener)) |link| {
+                defer allocator.free(link.desc);
+                try events.append(.{ .start_link = link.url });
+                try events.appendSlice(link.desc);
+                try events.append(.close_link);
+                cursor.token_index = link.end_index;
                 continue;
             },
-            .curly_brace_close => {
-                in_attr = false;
-                cursor.increment();
-                continue;
-            },
+
+            .curly_brace_open => in_attr = true,
+            .curly_brace_close => in_attr = false,
             .percent => if (in_attr) {
                 _ = cursor.until(.percent) orelse return error.UnclosedComment;
             },
@@ -231,26 +230,61 @@ fn parseParagraph(allocator: std.mem.Allocator, start_cursor: Cursor) !?Parse {
                     try events.append(.{ .verbatim_inline = verbatim.text });
                     cursor.token_index = verbatim.end_index;
                     continue;
-                } else {
-                    try events.append(.{ .text = cursor.tokenText(cursor.token_index) });
                 }
             },
+
+            .square_brace_close,
+            .parenthesis_close,
+            => {
+                if (opener != null and tokenClosesSpan(cursor, opener.?, cursor.token_index)) {
+                    cursor.increment();
+                    break :text_span;
+                }
+
+                // See if this closer matches any open spans
+                var prev_opt = prev_opener;
+                while (prev_opt) |prev| : (prev_opt = prev.prev) {
+                    if (tokenClosesSpan(cursor, prev.opener, cursor.token_index)) {
+                        return null;
+                    }
+                }
+            },
+
             .underscores,
             .asterisks,
             => {
-                if (tokenCouldStartSpan(cursor, cursor.token_index)) {
-                    const index = cursor.token_index;
-                    cursor.increment();
-                    if (try parseTextSpan(allocator, cursor, index, null)) |text_span| {
+                const index = cursor.token_index;
+
+                if (opener != null and tokenCouldCloseSpan(cursor, index)) {
+                    if (tokenClosesSpan(cursor, opener.?, index)) {
+                        cursor.increment();
+                        break :text_span;
+                    }
+
+                    var prev_opt = prev_opener;
+                    while (prev_opt) |prev| : (prev_opt = prev.prev) {
+                        if (tokenClosesSpan(cursor, prev.opener, index)) {
+                            return null;
+                        }
+                    }
+                }
+
+                cursor.increment();
+
+                if (tokenCouldStartSpan(cursor, index)) {
+                    if (try parseTextSpan(allocator, cursor, index, this_prev_opener)) |text_span| {
                         defer allocator.free(text_span.events);
                         try events.append(.start_strong);
                         try events.appendSlice(text_span.events);
                         try events.append(.close_strong);
                         cursor.token_index = text_span.end_index;
-                        continue;
+                        continue :text_span;
                     }
-                    cursor.token_index -= 1;
                 }
+
+                // Just make it into regular text otherwise
+                try events.append(.{ .text = cursor.tokenText(index) });
+                continue :text_span;
             },
         }
         try events.append(.{ .text = cursor.tokenText(cursor.token_index) });
@@ -345,151 +379,6 @@ fn eventsToAttributeText(allocator: std.mem.Allocator, events: []const Event) ![
 
     return text.toOwnedSlice();
 }
-
-fn parseTextSpan(allocator: std.mem.Allocator, start_cursor: Cursor, opener: Cursor.TokenIndex, prev_opener: ?*const PrevOpener) anyerror!?Parse {
-    var cursor = start_cursor;
-
-    var events = std.ArrayList(Event).init(allocator);
-    defer parseFree(allocator, events.toOwnedSlice());
-
-    var in_attr = false;
-
-    text_span: while (true) {
-        switch (cursor.token_kinds[cursor.token_index]) {
-            .eof => return null,
-            .double_newline => break,
-
-            .text,
-            .spaces,
-            .parenthesis_open,
-            => {},
-
-            .escape => {
-                try events.append(.{ .character = cursor.tokenText(cursor.token_index)[1..][0] });
-                cursor.increment();
-                continue;
-            },
-
-            .single_newline => switch (cursor.token_kinds[cursor.token_index + 1]) {
-                .single_newline => unreachable,
-
-                .eof,
-                .double_newline,
-                => {
-                    cursor.increment();
-                    continue;
-                },
-
-                else => {},
-            },
-
-            .autolink => if (try parseAutoLink(cursor)) |autolink| {
-                try events.append(autolink.event);
-                cursor.token_index = autolink.end_index;
-                continue;
-            } else {
-                return error.AutoLinkWasntAutoLink;
-            },
-
-            .exclaimation => if (try parseImageLink(allocator, cursor, &.{ .prev = prev_opener, .opener = opener })) |link| {
-                try events.append(.{ .image = .{
-                    .src = link.url,
-                    .alt = link.alt_text,
-                } });
-                cursor.token_index = link.end_index;
-                continue;
-            },
-
-            .square_brace_open => if (try parseLink(allocator, cursor, &.{ .prev = prev_opener, .opener = opener })) |link| {
-                defer allocator.free(link.desc);
-                try events.append(.{ .start_link = link.url });
-                try events.appendSlice(link.desc);
-                try events.append(.close_link);
-                cursor.token_index = link.end_index;
-                continue;
-            },
-
-            .curly_brace_open => in_attr = true,
-            .curly_brace_close => in_attr = false,
-            .percent => if (in_attr) {
-                _ = cursor.until(.percent) orelse return error.UnclosedComment;
-            },
-            .ticks => {
-                if (parseVerbatim(cursor)) |verbatim| {
-                    try events.append(.{ .verbatim_inline = verbatim.text });
-                    cursor.token_index = verbatim.end_index;
-                    continue;
-                }
-            },
-
-            .square_brace_close,
-            .parenthesis_close,
-            => {
-                if (tokenClosesSpan(cursor, opener, cursor.token_index)) {
-                    cursor.increment();
-                    break :text_span;
-                }
-
-                // See if this closer matches any open spans
-                var prev_opt = prev_opener;
-                while (prev_opt) |prev| : (prev_opt = prev.prev) {
-                    if (tokenClosesSpan(cursor, prev.opener, cursor.token_index)) {
-                        return null;
-                    }
-                }
-            },
-
-            .underscores,
-            .asterisks,
-            => {
-                const index = cursor.token_index;
-
-                if (tokenCouldCloseSpan(cursor, index)) {
-                    if (tokenClosesSpan(cursor, opener, index)) {
-                        cursor.increment();
-                        break :text_span;
-                    }
-
-                    var prev_opt = prev_opener;
-                    while (prev_opt) |prev| : (prev_opt = prev.prev) {
-                        if (tokenClosesSpan(cursor, prev.opener, index)) {
-                            return null;
-                        }
-                    }
-                }
-
-                cursor.increment();
-
-                if (tokenCouldStartSpan(cursor, index)) {
-                    if (try parseTextSpan(allocator, cursor, index, &.{ .prev = prev_opener, .opener = opener })) |text_span| {
-                        defer allocator.free(text_span.events);
-                        try events.append(.start_strong);
-                        try events.appendSlice(text_span.events);
-                        try events.append(.close_strong);
-                        cursor.token_index = text_span.end_index;
-                        continue :text_span;
-                    }
-                }
-
-                // Just make it into regular text otherwise
-                try events.append(.{ .text = cursor.tokenText(index) });
-                continue :text_span;
-            },
-        }
-        try events.append(.{ .text = cursor.tokenText(cursor.token_index) });
-        cursor.increment();
-    }
-
-    return Parse{
-        .events = events.toOwnedSlice(),
-        .end_index = cursor.token_index,
-    };
-}
-
-const PrevOpener = struct {
-    prev: ?*const PrevOpener,
-    opener: Cursor.TokenIndex,
-};
 
 fn tokenClosesSpan(cursor: Cursor, start: Cursor.TokenIndex, close: Cursor.TokenIndex) bool {
     const start_kind = cursor.token_kinds[start];

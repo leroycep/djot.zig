@@ -43,12 +43,12 @@ pub fn main() !void {
             var test_allocator = std.heap.GeneralPurposeAllocator(.{}){
                 .backing_allocator = gpa.allocator(),
             };
-            std.debug.print("\rrunning test {} from '{s}'", .{ i, file_entry.key_ptr.* });
+            std.debug.print("\r\x1b[0K" ++ "running test {} from '{s}'", .{ i, file_entry.key_ptr.* });
             if (testDjotToHtml(test_allocator.allocator(), test_case)) {
                 num.pass += 1;
             } else |err| {
                 num.fail += 1;
-                std.debug.print("test {} failed: {}\n```\n{s}\n```\n\n", .{ i, err, test_case.djot });
+                std.debug.print("\r\x1b[0K" ++ "test {} from '{s}' failed: {}\n```\n{s}\n```\n\n", .{ i, file_entry.key_ptr.*, err, test_case.djot });
             }
             if (test_allocator.deinit()) {
                 std.debug.print("test {} leaked memory:\n```\n{s}\n```\n\n", .{ i, test_case.djot });
