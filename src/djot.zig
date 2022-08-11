@@ -319,7 +319,11 @@ fn parseTextSpan(allocator: std.mem.Allocator, start_cursor: Cursor, opener: ?Cu
             },
 
             .underscores,
+            .underscores_open,
+            .underscores_close,
             .asterisks,
+            .asterisks_open,
+            .asterisks_close,
             => {
                 const index = cursor.token_index;
 
@@ -479,6 +483,8 @@ fn tokenCouldStartSpan(cursor: Cursor, index: Cursor.TokenIndex) bool {
     switch (cursor.token_kinds[index]) {
         .square_brace_open,
         .parenthesis_open,
+        .asterisks_open,
+        .underscores_open,
         => return true,
 
         .underscores,
@@ -498,6 +504,8 @@ fn tokenCouldCloseSpan(cursor: Cursor, index: Cursor.TokenIndex) bool {
     switch (cursor.token_kinds[index]) {
         .square_brace_close,
         .parenthesis_close,
+        .asterisks_close,
+        .underscores_close,
         => return true,
 
         .underscores,
@@ -518,8 +526,8 @@ fn tokenCouldCloseSpan(cursor: Cursor, index: Cursor.TokenIndex) bool {
 
 fn tokenToSpanEvents(cursor: Cursor, index: Cursor.TokenIndex) ?[2]Event {
     switch (cursor.token_kinds[index]) {
-        .underscores => return [_]Event{ .start_emphasis, .close_emphasis },
-        .asterisks => return [_]Event{ .start_strong, .close_strong },
+        .underscores, .underscores_open => return [_]Event{ .start_emphasis, .close_emphasis },
+        .asterisks, .asterisks_open => return [_]Event{ .start_strong, .close_strong },
         else => return null,
     }
 }
@@ -688,7 +696,16 @@ pub const Token = struct {
         escape,
 
         asterisks,
+        /// Asterisks preceded by a bracket (`{*`)
+        asterisks_open,
+        /// Asterisks followed by a bracket (`*}`)
+        asterisks_close,
+
         underscores,
+        /// Underscores preceded by a bracket (`{_`)
+        underscores_open,
+        /// Underscores followed by a bracket (`_}`)
+        underscores_close,
 
         eof,
     };
@@ -707,7 +724,9 @@ pub fn nextToken(source: []const u8, pos: usize) Token {
         autolink,
         escape,
         underscores,
+        underscores_open,
         asterisks,
+        asterisks_open,
     };
 
     var res = Token{
@@ -799,6 +818,16 @@ pub fn nextToken(source: []const u8, pos: usize) Token {
                     i += 1;
                     state = .comment;
                 },
+                '*' => {
+                    i += 1;
+                    res.kind = .asterisks_open;
+                    state = .asterisks_open;
+                },
+                '_' => {
+                    i += 1;
+                    res.kind = .underscores_open;
+                    state = .underscores_open;
+                },
                 else => break,
             },
             .comment => {
@@ -867,9 +896,35 @@ pub fn nextToken(source: []const u8, pos: usize) Token {
                     i += 1;
                     res.end = i;
                 },
+                '}' => {
+                    i += 1;
+                    res.kind = .underscores_close;
+                    res.end = i;
+                    break;
+                },
+                else => break,
+            },
+            .underscores_open => switch (source[i]) {
+                '_' => {
+                    i += 1;
+                    res.end = i;
+                },
                 else => break,
             },
             .asterisks => switch (source[i]) {
+                '*' => {
+                    i += 1;
+                    res.end = i;
+                },
+                '}' => {
+                    i += 1;
+                    res.kind = .asterisks_close;
+                    res.end = i;
+                    break;
+                },
+                else => break,
+            },
+            .asterisks_open => switch (source[i]) {
                 '*' => {
                     i += 1;
                     res.end = i;
