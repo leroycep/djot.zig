@@ -20,6 +20,8 @@ pub fn toHtml(allocator: std.mem.Allocator, source: []const u8) ![]const u8 {
             .close_paragraph => try html.appendSlice("</p>\n"),
             .start_strong => try html.appendSlice("<strong>"),
             .close_strong => try html.appendSlice("</strong>"),
+            .start_emphasis => try html.appendSlice("<em>"),
+            .close_emphasis => try html.appendSlice("</em>"),
             .verbatim_inline => |verbatim| {
                 try html.appendSlice("<code>");
                 try html.appendSlice(verbatim);
@@ -66,6 +68,72 @@ pub const Event = union(enum) {
 
     start_strong,
     close_strong,
+    start_emphasis,
+    close_emphasis,
+
+    pub fn eql(a: @This(), b: @This()) bool {
+        if (std.meta.activeTag(a) != b) {
+            return false;
+        }
+        return switch (a) {
+            .text => std.mem.eql(u8, a.text, b.text),
+            .verbatim_inline => std.mem.eql(u8, a.verbatim_inline, b.verbatim_inline),
+            .start_link => std.mem.eql(u8, a.start_link, b.start_link),
+            .image => std.mem.eql(u8, a.image.src, b.image.src) and std.mem.eql(u8, a.image.alt, b.image.alt),
+            .autolink => std.mem.eql(u8, a.autolink, b.autolink),
+            .autolink_email => std.mem.eql(u8, a.autolink_email, b.autolink_email),
+
+            .character => a.character == b.character,
+
+            // Events that are only tags just return true
+            .newline,
+            .start_paragraph,
+            .close_paragraph,
+            .start_strong,
+            .close_strong,
+            .start_emphasis,
+            .close_emphasis,
+            .close_link,
+            => true,
+        };
+    }
+
+    pub fn format(
+        this: @This(),
+        comptime fmt: []const u8,
+        options: std.fmt.FormatOptions,
+        writer: anytype,
+    ) !void {
+        _ = fmt;
+        _ = options;
+        switch (this) {
+            .text,
+            .verbatim_inline,
+            .start_link,
+            .autolink,
+            .autolink_email,
+            => |text| try writer.print("{s} \"{}\"", .{ std.meta.tagName(this), std.zig.fmtEscapes(text) }),
+
+            .image => |img| try writer.print("{s} alt=\"{}\" src=\"{}\"", .{ std.meta.tagName(this), std.zig.fmtEscapes(img.alt), std.zig.fmtEscapes(img.src) }),
+
+            .character => |c| {
+                var buf: [4]u8 = undefined;
+                const bytes_written = std.unicode.utf8Encode(c, &buf) catch unreachable;
+                try writer.print("{s} '{'}'", .{ std.meta.tagName(this), std.zig.fmtEscapes(buf[0..bytes_written]) });
+            },
+
+            // Events that are only tags just return true
+            .newline,
+            .start_paragraph,
+            .close_paragraph,
+            .start_strong,
+            .close_strong,
+            .start_emphasis,
+            .close_emphasis,
+            .close_link,
+            => try writer.print("{s}", .{std.meta.tagName(this)}),
+        }
+    }
 };
 
 /// The returned events must be freed with `parseFree`
@@ -272,11 +340,17 @@ fn parseTextSpan(allocator: std.mem.Allocator, start_cursor: Cursor, opener: ?Cu
                 cursor.increment();
 
                 if (tokenCouldStartSpan(cursor, index)) {
+                    const span_events = tokenToSpanEvents(cursor, index).?;
                     if (try parseTextSpan(allocator, cursor, index, this_prev_opener)) |text_span| {
                         defer allocator.free(text_span.events);
-                        try events.append(.start_strong);
+
+                        const token = cursor.tokenAt(index);
+                        const num = token.end - token.start;
+
+                        try events.appendNTimes(span_events[0], num);
                         try events.appendSlice(text_span.events);
-                        try events.append(.close_strong);
+                        try events.appendNTimes(span_events[1], num);
+
                         cursor.token_index = text_span.end_index;
                         continue :text_span;
                     }
@@ -403,25 +477,50 @@ fn tokenClosesSpan(cursor: Cursor, start: Cursor.TokenIndex, close: Cursor.Token
 
 fn tokenCouldStartSpan(cursor: Cursor, index: Cursor.TokenIndex) bool {
     switch (cursor.token_kinds[index]) {
+        .square_brace_open,
+        .parenthesis_open,
+        => return true,
+
         .underscores,
         .asterisks,
-        => return cursor.token_kinds[index -| 1] == .curly_brace_open or
-            !(cursor.token_kinds[index +| 1] == .spaces or
-            cursor.token_kinds[index +| 1] == .single_newline or
-            cursor.token_kinds[index +| 1] == .double_newline),
+        => {
+            const no_spaces_after = !(cursor.token_kinds[index +| 1] == .spaces or
+                cursor.token_kinds[index +| 1] == .single_newline or
+                cursor.token_kinds[index +| 1] == .double_newline);
+            return cursor.token_kinds[index -| 1] == .curly_brace_open or no_spaces_after;
+        },
+
         else => return false,
     }
 }
 
 fn tokenCouldCloseSpan(cursor: Cursor, index: Cursor.TokenIndex) bool {
     switch (cursor.token_kinds[index]) {
+        .square_brace_close,
+        .parenthesis_close,
+        => return true,
+
         .underscores,
         .asterisks,
-        => return cursor.token_kinds[index +| 1] == .curly_brace_close or
-            !(cursor.token_kinds[index -| 1] == .spaces or
-            cursor.token_kinds[index -| 1] == .single_newline or
-            cursor.token_kinds[index -| 1] == .double_newline),
+        => {
+            const followed_by_brace = cursor.token_kinds[index +| 1] == .curly_brace_close;
+
+            const before = cursor.token_kinds[index -| 1];
+            const no_spaces_before = !(before == .spaces or
+                before == .single_newline or
+                before == .double_newline or
+                before == .eof);
+            return followed_by_brace or no_spaces_before;
+        },
         else => return false,
+    }
+}
+
+fn tokenToSpanEvents(cursor: Cursor, index: Cursor.TokenIndex) ?[2]Event {
+    switch (cursor.token_kinds[index]) {
+        .underscores => return [_]Event{ .start_emphasis, .close_emphasis },
+        .asterisks => return [_]Event{ .start_strong, .close_strong },
+        else => return null,
     }
 }
 
@@ -673,7 +772,9 @@ pub fn nextToken(source: []const u8, pos: usize) Token {
                     res.end = i;
                     state = .asterisks;
                 },
-                ' ' => {
+                ' ',
+                '\t',
+                => {
                     res.kind = .spaces;
                     i += 1;
                     res.end = i;
@@ -727,6 +828,8 @@ pub fn nextToken(source: []const u8, pos: usize) Token {
                 ')',
                 '\\',
                 '*',
+                '_',
+                ' ',
                 => break,
                 else => {
                     res.kind = .text;
@@ -744,7 +847,9 @@ pub fn nextToken(source: []const u8, pos: usize) Token {
                 else => break,
             },
             .spaces => switch (source[i]) {
-                ' ' => {
+                ' ',
+                '\t',
+                => {
                     i += 1;
                     res.end = i;
                 },
@@ -797,4 +902,70 @@ pub fn nextToken(source: []const u8, pos: usize) Token {
         }
     }
     return res;
+}
+
+test "emphasis" {
+    try testParse(
+        \\_[bar_](url)
+    , &.{
+        .start_paragraph,
+        .start_emphasis,
+        .{ .text = "[" },
+        .{ .text = "bar" },
+        .close_emphasis,
+        .{ .text = "]" },
+        .{ .text = "(" },
+        .{ .text = "url" },
+        .{ .text = ")" },
+        .close_paragraph,
+    });
+}
+
+test "tabs are spaces" {
+    try testParse("_\ta_", &.{
+        .start_paragraph,
+        .{ .text = "_" },
+        .{ .text = "\t" },
+        .{ .text = "a" },
+        .{ .text = "_" },
+        .close_paragraph,
+    });
+}
+
+fn testParse(source: []const u8, expected: []const Event) !void {
+    const events = try parse(std.testing.allocator, source);
+    defer parseFree(std.testing.allocator, events);
+
+    if (expected.len != events.len) {
+        std.debug.print("Event slices are not the same length: {} != {}\n", .{ expected.len, events.len });
+        dumpParseTestCase(events, expected);
+        return error.TestExpectedEqual;
+    }
+    for (events) |event, i| {
+        if (!event.eql(expected[i])) {
+            std.debug.print("Expected parsed events to be the same, first difference at index {}\n", .{i});
+            dumpParseTestCase(events, expected);
+            return error.TestExpectedEqual;
+        }
+    }
+}
+
+fn dumpParseTestCase(events: []const Event, expected: []const Event) void {
+    std.debug.print("\nExpected\n", .{});
+    std.debug.print("=======\n", .{});
+    for (expected) |e, i| {
+        std.debug.print("events[{}] = {}\n", .{ i, e });
+    }
+    std.debug.print("=======\n", .{});
+    std.debug.print("\nParsed\n", .{});
+    std.debug.print("=======\n", .{});
+    for (events) |e, i| {
+        std.debug.print("events[{}] = {}\n", .{ i, e });
+    }
+    std.debug.print("=======\n", .{});
+}
+
+fn beep(src: std.builtin.SourceLocation, input: anytype) @TypeOf(input) {
+    std.debug.print("{s}:{} {}\n", .{ src.fn_name, src.line, input });
+    return input;
 }
