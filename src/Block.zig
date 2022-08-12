@@ -121,7 +121,7 @@ pub const Iterator = struct {
     };
 };
 
-test {
+test "headings" {
     try testParse(
         \\## A level _two_ heading
         \\
@@ -142,6 +142,63 @@ test {
         \\three lines
         },
         .{ .kind = .paragraph, .text = "A paragraph, finally." },
+    });
+}
+
+test "quote" {
+    try testParse(
+        \\> This is a block quote.
+        \\>
+        \\> 1. with a
+        \\> 2. list in it
+    , &.{
+        .{ .kind = .quote, .text = 
+        \\> This is a block quote.
+        \\>
+        \\> 1. with a
+        \\> 2. list in it
+        },
+    });
+
+    try testParse(
+        \\> This is a block
+        \\quote.
+    , &.{
+        .{ .kind = .quote, .text = 
+        \\> This is a block
+        \\quote.
+        },
+    });
+}
+
+test "list item" {
+    try testParse(
+        \\1.  This is a
+        \\ list item.
+        \\
+        \\ > containing a block quote
+    , &.{
+        .{ .kind = .list_item, .text = 
+        \\1.  This is a
+        \\ list item.
+        \\
+        \\ > containing a block quote
+        },
+    });
+
+    try testParse(
+        \\1.  This is a
+        \\list item.
+        \\
+        \\  Second paragraph under the
+    , &.{
+        .{ .kind = .quote, .text = 
+        \\1.  This is a
+        \\list item.
+        \\
+        \\  Second paragraph under the
+        \\list item.
+        },
     });
 }
 
