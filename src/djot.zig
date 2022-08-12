@@ -349,7 +349,11 @@ fn parseTextSpan(allocator: std.mem.Allocator, start_cursor: Cursor, opener: ?Cu
                         defer allocator.free(text_span.events);
 
                         const token = cursor.tokenAt(index);
-                        const num = token.end - token.start;
+                        const num = switch (token.kind) {
+                            .asterisks, .underscores => token.end - token.start,
+                            .asterisks_open, .underscores_open => token.end - token.start - 1,
+                            else => unreachable,
+                        };
 
                         try events.appendNTimes(span_events[0], num);
                         try events.appendSlice(text_span.events);
@@ -464,17 +468,33 @@ fn tokenClosesSpan(cursor: Cursor, start: Cursor.TokenIndex, close: Cursor.Token
     return switch (start_kind) {
         .square_brace_open => close_kind == .square_brace_close,
         .parenthesis_open => close_kind == .parenthesis_close,
-        .underscores,
-        .asterisks,
-        => {
-            if (start_kind != close_kind) {
-                return false;
-            }
-            if (!std.mem.eql(u8, cursor.tokenText(start), cursor.tokenText(close))) {
-                return false;
-            }
-            return true;
+
+        // TODO: Use length instead of text comparison
+        .underscores => switch (close_kind) {
+            .underscores_close => std.mem.eql(u8, cursor.tokenText(start), cursor.tokenText(close)[0..1]),
+            .underscores => std.mem.eql(u8, cursor.tokenText(start), cursor.tokenText(close)),
+            else => false,
         },
+
+        // TODO: Use length instead of text comparison
+        .asterisks => switch (close_kind) {
+            .asterisks_close => std.mem.eql(u8, cursor.tokenText(start), cursor.tokenText(close)[0..1]),
+            .asterisks => std.mem.eql(u8, cursor.tokenText(start), cursor.tokenText(close)),
+            else => false,
+        },
+
+        .underscores_open => switch (close_kind) {
+            .underscores_close => std.mem.eql(u8, cursor.tokenText(start)[1..], cursor.tokenText(close)[0..1]),
+            .underscores => std.mem.eql(u8, cursor.tokenText(start)[1..], cursor.tokenText(close)),
+            else => false,
+        },
+
+        .asterisks_open => switch (close_kind) {
+            .asterisks_close => std.mem.eql(u8, cursor.tokenText(start)[1..], cursor.tokenText(close)[0..1]),
+            .asterisks => std.mem.eql(u8, cursor.tokenText(start)[1..], cursor.tokenText(close)),
+            else => false,
+        },
+
         else => false,
     };
 }
@@ -493,7 +513,7 @@ fn tokenCouldStartSpan(cursor: Cursor, index: Cursor.TokenIndex) bool {
             const no_spaces_after = !(cursor.token_kinds[index +| 1] == .spaces or
                 cursor.token_kinds[index +| 1] == .single_newline or
                 cursor.token_kinds[index +| 1] == .double_newline);
-            return cursor.token_kinds[index -| 1] == .curly_brace_open or no_spaces_after;
+            return no_spaces_after;
         },
 
         else => return false,
@@ -511,14 +531,12 @@ fn tokenCouldCloseSpan(cursor: Cursor, index: Cursor.TokenIndex) bool {
         .underscores,
         .asterisks,
         => {
-            const followed_by_brace = cursor.token_kinds[index +| 1] == .curly_brace_close;
-
             const before = cursor.token_kinds[index -| 1];
             const no_spaces_before = !(before == .spaces or
                 before == .single_newline or
                 before == .double_newline or
                 before == .eof);
-            return followed_by_brace or no_spaces_before;
+            return no_spaces_before;
         },
         else => return false,
     }
@@ -821,11 +839,13 @@ pub fn nextToken(source: []const u8, pos: usize) Token {
                 '*' => {
                     i += 1;
                     res.kind = .asterisks_open;
+                    res.end = i;
                     state = .asterisks_open;
                 },
                 '_' => {
                     i += 1;
                     res.kind = .underscores_open;
+                    res.end = i;
                     state = .underscores_open;
                 },
                 else => break,
