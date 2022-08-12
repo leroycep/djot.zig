@@ -250,8 +250,11 @@ fn parseTextSpan(allocator: std.mem.Allocator, start_cursor: Cursor, opener: ?Cu
     } else null;
 
     var in_attr = false;
+    var start_of_line = if (opener == null) true else false;
 
     text_span: while (true) {
+        var new_start_of_line = false;
+        defer start_of_line = new_start_of_line;
         switch (cursor.token_kinds[cursor.token_index]) {
             .eof => if (opener == null) {
                 break;
@@ -261,9 +264,13 @@ fn parseTextSpan(allocator: std.mem.Allocator, start_cursor: Cursor, opener: ?Cu
             .double_newline => break,
 
             .text,
-            .spaces,
             .parenthesis_open,
             => {},
+
+            .spaces => if (start_of_line) {
+                cursor.increment();
+                continue;
+            },
 
             .ellipses => {
                 try events.append(.{ .text = "…" });
@@ -332,7 +339,9 @@ fn parseTextSpan(allocator: std.mem.Allocator, start_cursor: Cursor, opener: ?Cu
                     continue;
                 },
 
-                else => {},
+                else => {
+                    new_start_of_line = true;
+                },
             },
 
             .autolink => if (try parseAutoLink(cursor)) |autolink| {
