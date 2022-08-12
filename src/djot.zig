@@ -53,6 +53,7 @@ pub fn toHtml(allocator: std.mem.Allocator, source: []const u8) ![]const u8 {
             .image => |link| try html.writer().print("<img alt=\"{}\" src=\"{}\">", .{ std.zig.fmtEscapes(link.alt), std.zig.fmtEscapes(link.src) }),
             .autolink => |url| try html.writer().print("<a href=\"{}\">{s}</a>", .{ std.zig.fmtEscapes(url), url }),
             .autolink_email => |email| try html.writer().print("<a href=\"mailto:{}\">{s}</a>", .{ std.zig.fmtEscapes(email), email }),
+            .thematic_break => try html.appendSlice("<hr>\n"),
         }
     }
 
@@ -92,6 +93,7 @@ pub const Event = union(enum) {
     close_strong,
     start_emphasis,
     close_emphasis,
+    thematic_break,
 
     pub fn eql(a: @This(), b: @This()) bool {
         if (std.meta.activeTag(a) != b) {
@@ -116,6 +118,7 @@ pub const Event = union(enum) {
             .start_emphasis,
             .close_emphasis,
             .close_link,
+            .thematic_break,
             => true,
         };
     }
@@ -144,7 +147,7 @@ pub const Event = union(enum) {
                 try writer.print("{s} '{'}'", .{ std.meta.tagName(this), std.zig.fmtEscapes(buf[0..bytes_written]) });
             },
 
-            // Events that are only tags just return true
+            // Events that are only tags just print the tag name
             .newline,
             .start_paragraph,
             .close_paragraph,
@@ -153,6 +156,7 @@ pub const Event = union(enum) {
             .start_emphasis,
             .close_emphasis,
             .close_link,
+            .thematic_break,
             => try writer.print("{s}", .{std.meta.tagName(this)}),
         }
     }
@@ -190,6 +194,11 @@ pub fn parse(allocator: std.mem.Allocator, source: []const u8) ![]Event {
     var events = std.ArrayList(Event).init(allocator);
     defer parseFree(allocator, events.toOwnedSlice());
     while (true) {
+        if (parseThematicBreak(cursor)) |end_index| {
+            try events.append(.thematic_break);
+            cursor.token_index = end_index;
+            continue;
+        }
         if (try parseTextSpan(allocator, cursor, null, null)) |paragraph| {
             defer allocator.free(paragraph.events);
             try events.append(.start_paragraph);
@@ -222,6 +231,31 @@ pub fn parseFree(allocator: std.mem.Allocator, events: []const Event) void {
         }
     }
     allocator.free(events);
+}
+
+fn parseThematicBreak(start_cursor: Cursor) ?Cursor.TokenIndex {
+    var cursor = start_cursor;
+
+    _ = cursor.eat(.double_newline) orelse return null;
+
+    var num_chars: usize = 0;
+    while (@as(?u32, cursor.next())) |token_index| {
+        switch (cursor.token_kinds[cursor.token_index]) {
+            .asterisks,
+            .hyphens,
+            => {
+                const tok = cursor.tokenAt(token_index);
+                num_chars += tok.end - tok.start;
+            },
+            .spaces => {},
+            .double_newline => break,
+            else => return null,
+        }
+    }
+    if (num_chars >= 4) {
+        return cursor.token_index;
+    }
+    return null;
 }
 
 const Parse = struct {
