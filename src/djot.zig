@@ -1,5 +1,10 @@
 const std = @import("std");
 
+const LEFT_DOUBLE_QUOTE = '“';
+const RIGHT_DOUBLE_QUOTE = '”';
+const LEFT_SINGLE_QUOTE = '‘';
+const RIGHT_SINGLE_QUOTE = '’';
+
 // TODO: Use concrete error set
 pub fn toHtml(allocator: std.mem.Allocator, source: []const u8) ![]const u8 {
     const events = try parse(allocator, source);
@@ -19,6 +24,10 @@ pub fn toHtml(allocator: std.mem.Allocator, source: []const u8) ![]const u8 {
                         '…' => try html.appendSlice("&hellip;"),
                         '–' => try html.appendSlice("&ndash;"),
                         '—' => try html.appendSlice("&mdash;"),
+                        LEFT_DOUBLE_QUOTE => try html.appendSlice("&ldquo;"),
+                        RIGHT_DOUBLE_QUOTE => try html.appendSlice("&rdquo;"),
+                        LEFT_SINGLE_QUOTE => try html.appendSlice("&lsquo;"),
+                        RIGHT_SINGLE_QUOTE => try html.appendSlice("&rsquo;"),
                         else => try html.appendSlice(t[i..][0..codepoint_length]),
                     }
                     i += codepoint_length;
@@ -388,6 +397,8 @@ fn parseTextSpan(allocator: std.mem.Allocator, start_cursor: Cursor, opener: ?Cu
             .asterisks,
             .asterisks_open,
             .asterisks_close,
+            .double_quote,
+            .single_quote,
             => {
                 const index = cursor.token_index;
 
@@ -416,6 +427,7 @@ fn parseTextSpan(allocator: std.mem.Allocator, start_cursor: Cursor, opener: ?Cu
                         const num = switch (token.kind) {
                             .asterisks, .underscores => token.end - token.start,
                             .asterisks_open, .underscores_open => token.end - token.start - 1,
+                            .double_quote, .single_quote => 1,
                             else => unreachable,
                         };
 
@@ -532,6 +544,8 @@ fn tokenClosesSpan(cursor: Cursor, start: Cursor.TokenIndex, close: Cursor.Token
     return switch (start_kind) {
         .square_brace_open => close_kind == .square_brace_close,
         .parenthesis_open => close_kind == .parenthesis_close,
+        .double_quote => close_kind == .double_quote,
+        .single_quote => close_kind == .single_quote,
 
         // TODO: Use length instead of text comparison
         .underscores => switch (close_kind) {
@@ -569,6 +583,8 @@ fn tokenCouldStartSpan(cursor: Cursor, index: Cursor.TokenIndex) bool {
         .parenthesis_open,
         .asterisks_open,
         .underscores_open,
+        .double_quote,
+        .single_quote,
         => return true,
 
         .underscores,
@@ -590,6 +606,8 @@ fn tokenCouldCloseSpan(cursor: Cursor, index: Cursor.TokenIndex) bool {
         .parenthesis_close,
         .asterisks_close,
         .underscores_close,
+        .double_quote,
+        .single_quote,
         => return true,
 
         .underscores,
@@ -610,6 +628,8 @@ fn tokenToSpanEvents(cursor: Cursor, index: Cursor.TokenIndex) ?[2]Event {
     switch (cursor.token_kinds[index]) {
         .underscores, .underscores_open => return [_]Event{ .start_emphasis, .close_emphasis },
         .asterisks, .asterisks_open => return [_]Event{ .start_strong, .close_strong },
+        .double_quote => return [_]Event{ .{ .text = "“" }, .{ .text = "”" } },
+        .single_quote => return [_]Event{ .{ .text = "‘" }, .{ .text = "’" } },
         else => return null,
     }
 }
@@ -796,6 +816,8 @@ pub const Token = struct {
 
         hard_break,
         nonbreaking_space,
+        double_quote,
+        single_quote,
 
         eof,
     };
@@ -845,6 +867,8 @@ pub fn nextToken(source: []const u8, pos: usize) Token {
                 ']',
                 '(',
                 ')',
+                '"',
+                '\'',
                 => {
                     res.kind = switch (source[i]) {
                         '}' => .curly_brace_close,
@@ -854,6 +878,8 @@ pub fn nextToken(source: []const u8, pos: usize) Token {
                         ']' => .square_brace_close,
                         '(' => .parenthesis_open,
                         ')' => .parenthesis_close,
+                        '"' => .double_quote,
+                        '\'' => .single_quote,
                         else => unreachable,
                     };
                     i += 1;
@@ -968,6 +994,8 @@ pub fn nextToken(source: []const u8, pos: usize) Token {
                 ' ',
                 '.',
                 '-',
+                '"',
+                '\'',
                 => break,
                 else => {
                     res.kind = .text;
