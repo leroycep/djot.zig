@@ -17,19 +17,17 @@ pub fn toHtml(allocator: std.mem.Allocator, source: []const u8) ![]const u8 {
                     if (i + codepoint_length > t.len) return error.InvalidUTF8;
                     switch (try std.unicode.utf8Decode(t[i..][0..codepoint_length])) {
                         '…' => try html.appendSlice("&hellip;"),
+                        '–' => try html.appendSlice("&ndash;"),
+                        '—' => try html.appendSlice("&mdash;"),
                         else => try html.appendSlice(t[i..][0..codepoint_length]),
                     }
                     i += codepoint_length;
                 }
             },
             .newline => try html.appendSlice("\n"),
+            .hard_break => try html.appendSlice("<br>"),
             // TODO: Remove this? Seems redundant
-            .character => |char| {
-                const nbytes = try std.unicode.utf8CodepointSequenceLength(char);
-                try html.appendNTimes(undefined, nbytes);
-                const nbytes_written = try std.unicode.utf8Encode(char, html.items[html.items.len - nbytes ..]);
-                std.debug.assert(nbytes_written == nbytes);
-            },
+            .character => |c| try html.append(c),
             .start_paragraph => try html.appendSlice("<p>"),
             .close_paragraph => try html.appendSlice("</p>\n"),
             .start_strong => try html.appendSlice("<strong>"),
@@ -54,7 +52,8 @@ pub fn toHtml(allocator: std.mem.Allocator, source: []const u8) ![]const u8 {
 
 pub const Event = union(enum) {
     newline,
-    character: u21,
+    hard_break,
+    character: u8,
     text: []const u8,
     verbatim_inline: []const u8,
 
@@ -261,6 +260,51 @@ fn parseTextSpan(allocator: std.mem.Allocator, start_cursor: Cursor, opener: ?Cu
                 try events.append(.{ .text = "…" });
                 cursor.increment();
                 continue;
+            },
+
+            .hard_break => {
+                try events.append(.hard_break);
+                cursor.increment();
+                continue;
+            },
+
+            .nonbreaking_space => {
+                try events.append(.{ .text = " " });
+                cursor.increment();
+                continue;
+            },
+
+            .hyphens => {
+                const tok = cursor.tokenAt(cursor.token_index);
+                var remain = tok.end - tok.start;
+                if (remain % 3 == 0) {
+                    try events.appendNTimes(.{ .text = "—" }, remain / 3);
+                    cursor.increment();
+                    continue :text_span;
+                }
+                while (remain >= 3) : (remain -= 3) {
+                    if (remain % 5 == 0) {
+                        const num_em_en = remain / 5;
+                        try events.appendNTimes(.{ .text = "—" }, num_em_en);
+                        try events.appendNTimes(.{ .text = "–" }, num_em_en);
+                        cursor.increment();
+                        continue :text_span;
+                    }
+                    if (remain % 2 == 0) {
+                        try events.appendNTimes(.{ .text = "–" }, remain / 2);
+                        cursor.increment();
+                        continue :text_span;
+                    }
+                    try events.append(.{ .text = "—" });
+                }
+                if (remain % 2 == 0) {
+                    try events.appendNTimes(.{ .text = "–" }, remain / 2);
+                    cursor.increment();
+                    continue :text_span;
+                }
+                try events.appendNTimes(.{ .text = "-" }, remain);
+                cursor.increment();
+                continue :text_span;
             },
 
             .escape => {
@@ -747,6 +791,12 @@ pub const Token = struct {
 
         ellipses,
 
+        // 1 to n hyphens
+        hyphens,
+
+        hard_break,
+        nonbreaking_space,
+
         eof,
     };
 };
@@ -769,6 +819,7 @@ pub fn nextToken(source: []const u8, pos: usize) Token {
         asterisks_open,
         period1,
         period2,
+        hyphens,
     };
 
     var res = Token{
@@ -841,6 +892,12 @@ pub fn nextToken(source: []const u8, pos: usize) Token {
                     res.end = i;
                     state = .spaces;
                 },
+                '-' => {
+                    res.kind = .hyphens;
+                    i += 1;
+                    res.end = i;
+                    state = .hyphens;
+                },
                 '<' => {
                     res.kind = .autolink;
                     i += 1;
@@ -910,6 +967,7 @@ pub fn nextToken(source: []const u8, pos: usize) Token {
                 '_',
                 ' ',
                 '.',
+                '-',
                 => break,
                 else => {
                     res.kind = .text;
@@ -982,6 +1040,13 @@ pub fn nextToken(source: []const u8, pos: usize) Token {
                 },
                 else => break,
             },
+            .hyphens => switch (source[i]) {
+                '-' => {
+                    i += 1;
+                    res.end = i;
+                },
+                else => break,
+            },
             .autolink => switch (source[i]) {
                 ' ',
                 '\n',
@@ -998,12 +1063,28 @@ pub fn nextToken(source: []const u8, pos: usize) Token {
                     i += 1;
                 },
             },
-            .escape => switch (source[i]) {
-                else => {
+            .escape => {
+                if (std.ascii.isPunct(source[i])) {
                     i += 1;
                     res.end = i;
                     break;
-                },
+                }
+                if (source[i] == '\n') {
+                    i += 1;
+                    res.kind = .hard_break;
+                    res.end = i;
+                    break;
+                }
+                if (source[i] == ' ') {
+                    i += 1;
+                    res.kind = .nonbreaking_space;
+                    res.end = i;
+                    break;
+                }
+                i += 1;
+                res.kind = .text;
+                res.end = i;
+                state = .text;
             },
             .period1 => switch (source[i]) {
                 '.' => {
