@@ -1,5 +1,6 @@
 const std = @import("std");
 
+// TODO: Use concrete error set
 pub fn toHtml(allocator: std.mem.Allocator, source: []const u8) ![]const u8 {
     const events = try parse(allocator, source);
     defer parseFree(allocator, events);
@@ -8,8 +9,21 @@ pub fn toHtml(allocator: std.mem.Allocator, source: []const u8) ![]const u8 {
     defer html.deinit();
     for (events) |event| {
         switch (event) {
-            .text => |t| try html.appendSlice(t),
+            .text => |t| {
+                var i: usize = 0;
+                while (i < t.len) {
+                    const codepoint_length = try std.unicode.utf8ByteSequenceLength(t[i]);
+                    // TODO: check this earlier?
+                    if (i + codepoint_length > t.len) return error.InvalidUTF8;
+                    switch (try std.unicode.utf8Decode(t[i..][0..codepoint_length])) {
+                        '…' => try html.appendSlice("&hellip;"),
+                        else => try html.appendSlice(t[i..][0..codepoint_length]),
+                    }
+                    i += codepoint_length;
+                }
+            },
             .newline => try html.appendSlice("\n"),
+            // TODO: Remove this? Seems redundant
             .character => |char| {
                 const nbytes = try std.unicode.utf8CodepointSequenceLength(char);
                 try html.appendNTimes(undefined, nbytes);
@@ -242,6 +256,12 @@ fn parseTextSpan(allocator: std.mem.Allocator, start_cursor: Cursor, opener: ?Cu
             .spaces,
             .parenthesis_open,
             => {},
+
+            .ellipses => {
+                try events.append(.{ .text = "…" });
+                cursor.increment();
+                continue;
+            },
 
             .escape => {
                 try events.append(.{ .character = cursor.tokenText(cursor.token_index)[1..][0] });
@@ -725,6 +745,8 @@ pub const Token = struct {
         /// Underscores followed by a bracket (`_}`)
         underscores_close,
 
+        ellipses,
+
         eof,
     };
 };
@@ -745,6 +767,8 @@ pub fn nextToken(source: []const u8, pos: usize) Token {
         underscores_open,
         asterisks,
         asterisks_open,
+        period1,
+        period2,
     };
 
     var res = Token{
@@ -829,6 +853,12 @@ pub fn nextToken(source: []const u8, pos: usize) Token {
                     res.end = i;
                     state = .escape;
                 },
+                '.' => {
+                    res.kind = .text;
+                    i += 1;
+                    res.end = i;
+                    state = .period1;
+                },
                 else => state = .text,
             },
             .curly_brace_open => switch (source[i]) {
@@ -879,6 +909,7 @@ pub fn nextToken(source: []const u8, pos: usize) Token {
                 '*',
                 '_',
                 ' ',
+                '.',
                 => break,
                 else => {
                     res.kind = .text;
@@ -973,6 +1004,22 @@ pub fn nextToken(source: []const u8, pos: usize) Token {
                     res.end = i;
                     break;
                 },
+            },
+            .period1 => switch (source[i]) {
+                '.' => {
+                    i += 1;
+                    state = .period2;
+                },
+                else => break,
+            },
+            .period2 => switch (source[i]) {
+                '.' => {
+                    i += 1;
+                    res.kind = .ellipses;
+                    res.end = i;
+                    break;
+                },
+                else => break,
             },
         }
     }
