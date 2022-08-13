@@ -4,7 +4,8 @@ const Marker = @import("./Marker.zig");
 
 const Event = union(enum) {
     text: []const u8,
-    heading: []const u8,
+    start_heading: u32,
+    close_heading,
 
     start_quote,
     close_quote,
@@ -30,12 +31,14 @@ const Event = union(enum) {
         _ = options;
         switch (this) {
             .text,
-            .heading,
             .start_tight_list,
             .start_loose_list,
             => |text| try writer.print("{s} \"{}\"", .{ std.meta.tagName(this), std.zig.fmtEscapes(text) }),
 
+            .start_heading => |level| try writer.print("{s} {}", .{ std.meta.tagName(this), level }),
+
             // Events that are only tags just print the tag name
+            .close_heading,
             .start_quote,
             .close_quote,
             .close_tight_list,
@@ -51,155 +54,168 @@ pub fn parse(allocator: std.mem.Allocator, source: [*:0]const u8) ![]Event {
     var events = std.ArrayList(Event).init(allocator);
     defer events.deinit();
 
+    var cursor = Cursor{
+        .source = source,
+        .out_buffer = &events,
+        .index = 0,
+        .out_len = 0,
+    };
+
     // for debugging
     var prev_index_opt: ?u32 = null;
 
-    var index: u32 = 0;
-    while (parseToken(source, index)) |token| {
+    var loop_cursor = cursor.copy();
+    while (parseToken(&loop_cursor)) |token| : (loop_cursor = cursor.copy()) {
         switch (token.kind) {
-            .newline, .section_break, .spaces => index = token.end,
+            .newline, .section_break, .spaces => cursor.commit(loop_cursor),
 
-            .heading => if (parseHeading(source, index)) |heading_end| {
-                try events.append(.{ .heading = source[index..heading_end] });
-                index = heading_end;
-            },
-            .marker => if (try parseList(allocator, source, index)) |list| {
-                defer allocator.free(list.events);
-                const marker = Marker.parse(source, list.first_marker).?;
-                try events.append(.{ .start_tight_list = source[list.first_marker..marker.end] });
-                try events.appendSlice(list.events);
-                try events.append(.close_tight_list);
-                index = list.end;
-            },
-            .text => if (parseText(source, index)) |text_end| {
-                try events.append(.{ .text = source[index..text_end] });
-                index = text_end;
-            },
+            .heading => _ = try parseHeading(&cursor),
+            .marker => _ = try parseList(&cursor),
+            .text => _ = try parseText(&cursor),
         }
 
         // TODO: Panic once everything is supposed to be implemented
         //std.debug.panic("This is a bug in djot.zig: all types of lines should be handled", .{});
         defer if (builtin.mode == .Debug) {
-            prev_index_opt = index;
+            prev_index_opt = cursor.index;
         };
         if (builtin.mode == .Debug) {
             if (prev_index_opt) |prev_index| {
-                if (index == prev_index) {
+                if (cursor.index == prev_index) {
                     return error.WouldLoop;
                 }
             }
         }
     }
 
+    events.items.len = cursor.out_len;
+
     return events.toOwnedSlice();
 }
 
-pub fn parseHeading(source: [*:0]const u8, start_index: u32) ?u32 {
-    if (source[start_index] != '#') return null;
-    var index = start_index;
-    while (source[index] != 0) : (index += 1) {
-        if (source[index] == '\n') {
-            if (source[index + 1] == 0 or source[index + 1] == '\n') {
-                return index;
-            }
-        }
-    }
-    return index;
+pub fn parseHeading(parent: *Cursor) !?void {
+    var cursor = parent.copy();
+    const token = parseExpectToken(&cursor, .heading) orelse return null;
+    const level = token.end - token.start;
+
+    try cursor.append(.{ .start_heading = level });
+    _ = parseExpectToken(&cursor, .spaces);
+    _ = try parseText(&cursor);
+    _ = parseExpectToken(&cursor, .section_break);
+    try cursor.append(.close_heading);
+
+    parent.commit(cursor);
 }
 
-pub const List = struct {
-    first_marker: u32,
-    events: []Event,
-    end: u32,
-};
+pub fn parseList(parent: *Cursor) !?void {
+    var cursor = parent.copy();
 
-pub fn parseList(allocator: std.mem.Allocator, source: [*:0]const u8, start_index: u32) !?List {
-    const first_list_item = (try parseListItem(allocator, source, start_index)) orelse return null;
+    // Allocate a place for the start event; we'll have to update it once we know
+    // whether it's a tight or loose list
+    const start_event_idx = cursor.out_len;
+    try cursor.append(undefined);
 
-    var events = std.ArrayList(Event).fromOwnedSlice(allocator, first_list_item.events);
-    try events.insert(0, .start_list_item);
-    try events.append(.close_list_item);
-    defer events.deinit();
+    const first_list_item = (try parseListItem(&cursor)) orelse return null;
 
-    var list_style = Marker.parse(source, first_list_item.marker).?.style;
+    const list_marker = Marker.parse(cursor.source, first_list_item.marker).?;
 
-    var index = first_list_item.end;
-    if (parseExpectToken(source, index, .newline) orelse parseExpectToken(source, index, .section_break)) |tok| {
-        index = tok.end;
+    var list_style = list_marker.style;
+    var next_item_would_make_loose = false;
+    var tight = first_list_item.tight;
+
+    _ = parseExpectToken(&cursor, .newline);
+    if (parseExpectToken(&cursor, .section_break)) |_| {
+        next_item_would_make_loose = true;
     }
-    while (try parseListItem(allocator, source, index)) |list_item| : (index = list_item.end) {
-        defer allocator.free(list_item.events);
-        const style = Marker.parse(source, list_item.marker).?.style;
+
+    var loop_cursor = cursor.copy();
+    while (try parseListItem(&loop_cursor)) |list_item| {
+        const style = Marker.parse(cursor.source, list_item.marker).?.style;
 
         if (style != list_style and list_style.isRoman() and style.isAlpha()) {
             if (style != list_style.romanToAlpha()) break;
             list_style = list_style.romanToAlpha();
+        } else if (style != list_style and list_style.isAlpha() and style.isRoman()) {
+            if (style.romanToAlpha() != list_style) break;
+            // continue on
         } else if (style != list_style) {
             break;
         }
 
-        try events.append(.start_list_item);
-        try events.appendSlice(list_item.events);
-        try events.append(.close_list_item);
+        if (next_item_would_make_loose) {
+            tight = false;
+        }
+        if (!list_item.tight) {
+            tight = false;
+        }
+
+        cursor.commit(loop_cursor);
+
+        _ = parseExpectToken(&loop_cursor, .newline);
+        if (parseExpectToken(&loop_cursor, .section_break)) |_| {
+            next_item_would_make_loose = true;
+        }
     }
 
-    return List{
-        .first_marker = first_list_item.marker,
-        .events = events.toOwnedSlice(),
-        .end = index,
-    };
+    if (tight) {
+        cursor.out_buffer.items.ptr[start_event_idx] = .{ .start_tight_list = cursor.source[first_list_item.marker..list_marker.end] };
+        try cursor.append(.close_tight_list);
+    } else {
+        cursor.out_buffer.items.ptr[start_event_idx] = .{ .start_loose_list = cursor.source[first_list_item.marker..list_marker.end] };
+        try cursor.append(.close_loose_list);
+    }
+    parent.commit(cursor);
+    return;
 }
 
 pub const ListItem = struct {
     marker: u32,
-    events: []Event,
-    end: u32,
+    tight: bool,
 };
 
-fn parseListItem(allocator: std.mem.Allocator, source: [*:0]const u8, start_index: u32) !?ListItem {
-    const marker = parseExpectToken(source, start_index, .marker) orelse return null;
+fn parseListItem(parent_cursor: *Cursor) !?ListItem {
+    var cursor = parent_cursor.copy();
+    try cursor.append(.start_list_item);
 
-    var events = std.ArrayList(Event).init(allocator);
-    defer events.deinit();
+    const marker = parseExpectToken(&cursor, .marker) orelse return null;
 
-    var index = marker.end;
-    if (parseExpectToken(source, index, .spaces)) |tok| {
-        index = tok.end;
-    }
-    const first_text = parseText(source, index) orelse return null;
-    try events.append(.{ .text = source[index..first_text] });
-    index = first_text;
-    var i = index;
+    // Remove any leading spaces
+    _ = parseExpectToken(&cursor, .spaces);
+
+    // Parse at least one bit of text
+    (try parseText(&cursor)) orelse return null;
+    var tight = true;
     while (true) {
-        if (parseExpectToken(source, i, .newline) orelse parseExpectToken(source, i, .section_break)) |tok| {
-            i = tok.end;
+        var loop_cursor = cursor;
+        // If there is a newline or a section break, skip it
+        _ = parseExpectToken(&loop_cursor, .newline);
+        if (parseExpectToken(&loop_cursor, .newline) orelse parseExpectToken(&loop_cursor, .section_break)) |_| {
+            tight = false;
         }
-        const spaces = parseExpectToken(source, i, .spaces) orelse break;
-        i = spaces.end;
-        index = i;
-        if (parseText(source, i)) |text_end| {
-            try events.append(.{ .text = source[i..text_end] });
-            i = text_end;
-            index = i;
+        _ = parseExpectToken(&loop_cursor, .spaces) orelse break;
+        if (try parseText(&loop_cursor)) |_| {
+            cursor.commit(loop_cursor);
             continue;
         }
         return error.Unimplemented;
     }
 
+    try cursor.append(.close_list_item);
+    parent_cursor.commit(cursor);
     return ListItem{
-        .marker = start_index,
-        .events = events.toOwnedSlice(),
-        .end = index,
+        .marker = marker.start,
+        .tight = tight,
     };
 }
 
-pub fn parseText(source: [*:0]const u8, start_index: u32) ?u32 {
-    var index = start_index;
-    const first_token = parseExpectToken(source, index, .text) orelse return null;
-    index = first_token.end;
+pub fn parseText(parent: *Cursor) !?void {
+    const first_text = parseExpectToken(parent, .text) orelse return null;
 
-    var i = index;
-    while (parseToken(source, i)) |token| : (i = token.end) {
+    const start_index = first_text.start;
+    var end_index = first_text.end;
+
+    var cursor = parent.copy();
+    while (parseToken(&cursor)) |token| {
         switch (token.kind) {
             .section_break,
             .spaces,
@@ -209,15 +225,23 @@ pub fn parseText(source: [*:0]const u8, start_index: u32) ?u32 {
 
             .newline => {},
 
-            .text => index = i,
+            .text => {
+                end_index = token.end;
+                parent.commit(cursor);
+            },
         }
     }
-    return index;
+
+    try parent.append(.{ .text = parent.source[start_index..end_index] });
+
+    return;
 }
 
-fn parseExpectToken(source: [*:0]const u8, start_index: u32, expected_token_kind: Token.Kind) ?Token {
-    const token = parseToken(source, start_index) orelse return null;
+fn parseExpectToken(parent: *Cursor, expected_token_kind: Token.Kind) ?Token {
+    var cursor = parent.copy();
+    const token = parseToken(&cursor) orelse return null;
     if (token.kind == expected_token_kind) {
+        parent.commit(cursor);
         return token;
     }
     return null;
@@ -225,6 +249,7 @@ fn parseExpectToken(source: [*:0]const u8, start_index: u32, expected_token_kind
 
 pub const Token = struct {
     kind: Kind,
+    start: u32,
     end: u32,
 
     pub const Kind = enum {
@@ -237,10 +262,13 @@ pub const Token = struct {
     };
 };
 
-pub fn parseToken(source: [*:0]const u8, start_index: u32) ?Token {
-    if (source[start_index] == 0) return null;
-    if (Marker.parse(source, start_index)) |marker| {
+pub fn parseToken(parent: *Cursor) ?Token {
+    if (parent.source[parent.index] == 0) return null;
+    if (Marker.parse(parent.source, parent.index)) |marker| {
+        const start = parent.index;
+        parent.index = marker.end;
         return Token{
+            .start = start,
             .kind = .marker,
             .end = marker.end,
         };
@@ -257,14 +285,15 @@ pub fn parseToken(source: [*:0]const u8, start_index: u32) ?Token {
 
     var res = Token{
         .kind = .text,
-        .end = start_index,
+        .start = parent.index,
+        .end = parent.index,
     };
 
-    var index = start_index;
+    var index = parent.index;
     var state = State.default;
-    while (source[index] != 0) : (index += 1) {
+    while (parent.source[index] != 0) : (index += 1) {
         switch (state) {
-            .default => switch (source[index]) {
+            .default => switch (parent.source[index]) {
                 '\n' => {
                     res.kind = .newline;
                     res.end = index + 1;
@@ -285,7 +314,7 @@ pub fn parseToken(source: [*:0]const u8, start_index: u32) ?Token {
                     state = .text;
                 },
             },
-            .newline => switch (source[index]) {
+            .newline => switch (parent.source[index]) {
                 '\n' => {
                     res.kind = .section_break;
                     res.end = index + 1;
@@ -293,19 +322,19 @@ pub fn parseToken(source: [*:0]const u8, start_index: u32) ?Token {
                 },
                 else => break,
             },
-            .section_break => switch (source[index]) {
+            .section_break => switch (parent.source[index]) {
                 '\n' => res.end = index + 1,
                 else => break,
             },
-            .heading => switch (source[index]) {
+            .heading => switch (parent.source[index]) {
                 '#' => res.end = index + 1,
                 else => break,
             },
-            .text => switch (source[index]) {
+            .text => switch (parent.source[index]) {
                 '\n' => break,
                 else => res.end = index + 1,
             },
-            .spaces => switch (source[index]) {
+            .spaces => switch (parent.source[index]) {
                 ' ' => {
                     res.end = index + 1;
                 },
@@ -314,15 +343,51 @@ pub fn parseToken(source: [*:0]const u8, start_index: u32) ?Token {
         }
     }
 
+    parent.index = res.end;
+
     return res;
 }
+
+const Cursor = struct {
+    source: [*:0]const u8,
+    out_buffer: *std.ArrayList(Event),
+    index: u32,
+    out_len: u32,
+
+    pub fn copy(this: @This()) @This() {
+        return @This(){
+            .source = this.source,
+            .out_buffer = this.out_buffer,
+            .index = this.index,
+            .out_len = this.out_len,
+        };
+    }
+
+    pub fn append(this: *@This(), event: Event) !void {
+        try this.appendSlice(&.{event});
+    }
+
+    pub fn appendSlice(this: *@This(), events: []const Event) !void {
+        try this.out_buffer.ensureTotalCapacity(this.out_len + events.len);
+        std.mem.copy(Event, this.out_buffer.items.ptr[this.out_len..this.out_buffer.capacity][0..events.len], events);
+        this.out_len += @intCast(u32, events.len);
+    }
+
+    // Updates another Parser
+    pub fn commit(this: *@This(), other: @This()) void {
+        this.index = other.index;
+        this.out_len = other.out_len;
+    }
+};
 
 test "heading" {
     try testParse(
         \\## A level _two_ heading
         \\
     , &.{
-        .{ .heading = "## A level _two_ heading" },
+        .{ .start_heading = 2 },
+        .{ .text = "A level _two_ heading" },
+        .close_heading,
     });
 }
 
@@ -334,11 +399,13 @@ test "heading" {
         \\
         \\A paragraph, finally.
     , &.{
-        .{ .heading = 
-        \\## A heading that
+        .{ .start_heading = 2 },
+        .{ .text = 
+        \\A heading that
         \\takes up
         \\three lines
         },
+        .close_heading,
         .{ .text = 
         \\A paragraph, finally.
         },
@@ -403,6 +470,8 @@ test "list item" {
         .start_list_item,
         .{ .text = 
         \\This is a
+        },
+        .{ .text = 
         \\list item.
         },
 
@@ -426,7 +495,7 @@ test "list item" {
         \\  Second paragraph under the
         \\list item.
     , &.{
-        .{ .start_loose_list = "1" },
+        .{ .start_loose_list = "1. " },
 
         .start_list_item,
         .{ .text = 
@@ -515,13 +584,12 @@ test "list: start number" {
 }
 
 test "loose list" {
-    if (true) return error.SkipZigTest;
     try testParse(
         \\- one
         \\
         \\- two
     , &.{
-        .{ .start_loose_list = "-" },
+        .{ .start_loose_list = "- " },
 
         .start_list_item,
         .{ .text = "one" },
