@@ -55,34 +55,26 @@ pub fn parse(allocator: std.mem.Allocator, source: [*:0]const u8) ![]Event {
     var prev_index_opt: ?u32 = null;
 
     var index: u32 = 0;
-    while (source[index] != 0) {
-        std.debug.print("source[{}] = {'}\n", .{ index, std.zig.fmtEscapes(source[index .. index + 1]) });
-        // skip blank lines
-        if (source[index] == '\n') {
-            index += 1;
-            continue;
-        }
+    while (parseToken(source, index)) |token| {
+        switch (token.kind) {
+            .newline, .section_break, .spaces => index = token.end,
 
-        if (parseHeading(source, index)) |heading_end| {
-            try events.append(.{ .heading = source[index..heading_end] });
-            index = heading_end;
-            continue;
-        }
-
-        if (try parseList(allocator, source, index)) |list| {
-            defer allocator.free(list.events);
-            const marker = Marker.parse(source, list.first_marker).?;
-            try events.append(.{ .start_tight_list = source[list.first_marker..marker.end] });
-            try events.appendSlice(list.events);
-            try events.append(.close_tight_list);
-            index = list.end;
-            continue;
-        }
-
-        if (parseText(source, index)) |text_end| {
-            try events.append(.{ .text = source[index..text_end] });
-            index = text_end;
-            continue;
+            .heading => if (parseHeading(source, index)) |heading_end| {
+                try events.append(.{ .heading = source[index..heading_end] });
+                index = heading_end;
+            },
+            .marker => if (try parseList(allocator, source, index)) |list| {
+                defer allocator.free(list.events);
+                const marker = Marker.parse(source, list.first_marker).?;
+                try events.append(.{ .start_tight_list = source[list.first_marker..marker.end] });
+                try events.appendSlice(list.events);
+                try events.append(.close_tight_list);
+                index = list.end;
+            },
+            .text => if (parseText(source, index)) |text_end| {
+                try events.append(.{ .text = source[index..text_end] });
+                index = text_end;
+            },
         }
 
         // TODO: Panic once everything is supposed to be implemented
@@ -132,6 +124,9 @@ pub fn parseList(allocator: std.mem.Allocator, source: [*:0]const u8, start_inde
     var list_style = Marker.parse(source, first_list_item.marker).?.style;
 
     var index = first_list_item.end;
+    if (parseExpectToken(source, index, .newline) orelse parseExpectToken(source, index, .section_break)) |tok| {
+        index = tok.end;
+    }
     while (try parseListItem(allocator, source, index)) |list_item| : (index = list_item.end) {
         defer allocator.free(list_item.events);
         const style = Marker.parse(source, list_item.marker).?.style;
@@ -168,18 +163,24 @@ fn parseListItem(allocator: std.mem.Allocator, source: [*:0]const u8, start_inde
     defer events.deinit();
 
     var index = marker.end;
+    if (parseExpectToken(source, index, .spaces)) |tok| {
+        index = tok.end;
+    }
     const first_text = parseText(source, index) orelse return null;
     try events.append(.{ .text = source[index..first_text] });
     index = first_text;
+    var i = index;
     while (true) {
-        if (parseExpectToken(source, index, .newline) orelse parseExpectToken(source, index, .section_break)) |tok| {
-            index = tok.end;
+        if (parseExpectToken(source, i, .newline) orelse parseExpectToken(source, i, .section_break)) |tok| {
+            i = tok.end;
         }
-        const spaces = parseExpectToken(source, start_index, .spaces) orelse break;
-        index = spaces.end;
-        if (parseText(source, index)) |text_end| {
-            try events.append(.{ .text = source[index..text_end] });
-            index = text_end;
+        const spaces = parseExpectToken(source, i, .spaces) orelse break;
+        i = spaces.end;
+        index = i;
+        if (parseText(source, i)) |text_end| {
+            try events.append(.{ .text = source[i..text_end] });
+            i = text_end;
+            index = i;
             continue;
         }
         return error.Unimplemented;
@@ -196,15 +197,19 @@ pub fn parseText(source: [*:0]const u8, start_index: u32) ?u32 {
     var index = start_index;
     const first_token = parseExpectToken(source, index, .text) orelse return null;
     index = first_token.end;
-    while (parseToken(source, index)) |token| : (index = token.end) {
+
+    var i = index;
+    while (parseToken(source, i)) |token| : (i = token.end) {
         switch (token.kind) {
             .section_break,
             .spaces,
+            .heading,
             .marker,
-            .newline,
             => break,
 
-            .text => continue,
+            .newline => {},
+
+            .text => index = i,
         }
     }
     return index;
@@ -226,6 +231,7 @@ pub const Token = struct {
         newline,
         section_break,
         text,
+        heading,
         marker,
         spaces,
     };
@@ -242,10 +248,11 @@ pub fn parseToken(source: [*:0]const u8, start_index: u32) ?Token {
 
     const State = enum {
         default,
-        text,
-        spaces,
         newline,
         section_break,
+        text,
+        heading,
+        spaces,
     };
 
     var res = Token{
@@ -268,20 +275,15 @@ pub fn parseToken(source: [*:0]const u8, start_index: u32) ?Token {
                     res.end = index + 1;
                     state = .spaces;
                 },
+                '#' => {
+                    res.kind = .heading;
+                    res.end = index + 1;
+                    state = .heading;
+                },
                 else => {
                     res.kind = .text;
                     state = .text;
                 },
-            },
-            .text => switch (source[index]) {
-                '\n' => break,
-                else => res.end = index + 1,
-            },
-            .spaces => switch (source[index]) {
-                ' ' => {
-                    res.end = index + 1;
-                },
-                else => break,
             },
             .newline => switch (source[index]) {
                 '\n' => {
@@ -293,6 +295,20 @@ pub fn parseToken(source: [*:0]const u8, start_index: u32) ?Token {
             },
             .section_break => switch (source[index]) {
                 '\n' => res.end = index + 1,
+                else => break,
+            },
+            .heading => switch (source[index]) {
+                '#' => res.end = index + 1,
+                else => break,
+            },
+            .text => switch (source[index]) {
+                '\n' => break,
+                else => res.end = index + 1,
+            },
+            .spaces => switch (source[index]) {
+                ' ' => {
+                    res.end = index + 1;
+                },
                 else => break,
             },
         }
@@ -382,7 +398,7 @@ test "list item" {
         \\
         \\ > containing a block quote
     , &.{
-        .{ .start_loose_list = "1" },
+        .{ .start_loose_list = "1. " },
 
         .start_list_item,
         .{ .text = 
@@ -461,12 +477,11 @@ test "list" {
 }
 
 test "list: alpha/roman ambiguous" {
-    if (true) return error.SkipZigTest;
     try testParse(
         \\i. item
         \\j. next item
     , &.{
-        .{ .start_tight_list = "i" },
+        .{ .start_tight_list = "i. " },
 
         .start_list_item,
         .{ .text = "item" },
@@ -481,19 +496,18 @@ test "list: alpha/roman ambiguous" {
 }
 
 test "list: start number" {
-    if (true) return error.SkipZigTest;
     try testParse(
         \\5) five
         \\8) six
     , &.{
-        .{ .start_tight_list = "5" },
+        .{ .start_tight_list = "5) " },
 
         .start_list_item,
-        .{ .text = "item" },
+        .{ .text = "five" },
         .close_list_item,
 
         .start_list_item,
-        .{ .text = "next item" },
+        .{ .text = "six" },
         .close_list_item,
 
         .close_tight_list,
@@ -538,4 +552,9 @@ fn testParse(source: [*:0]const u8, expected: []const Event) !void {
     }
 
     try std.testing.expectEqualStrings(expected_text.items, parsed_text.items);
+}
+
+fn beep(src: std.builtin.SourceLocation, input: anytype) @TypeOf(input) {
+    std.debug.print("{s}:{} {}\n", .{ src.fn_name, src.line, input });
+    return input;
 }
