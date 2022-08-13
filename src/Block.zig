@@ -66,25 +66,26 @@ pub fn parse(allocator: std.mem.Allocator, source: [*:0]const u8) ![]Event {
 
     var loop_cursor = cursor.copy();
     while (parseToken(&loop_cursor)) |token| : (loop_cursor = cursor.copy()) {
-        switch (token.kind) {
-            .newline, .section_break, .spaces => cursor.commit(loop_cursor),
-
-            .heading => _ = try parseHeading(&cursor),
-            .marker => _ = try parseList(&cursor),
-            .text => _ = try parseText(&cursor),
-        }
-
         // TODO: Panic once everything is supposed to be implemented
         //std.debug.panic("This is a bug in djot.zig: all types of lines should be handled", .{});
-        defer if (builtin.mode == .Debug) {
-            prev_index_opt = cursor.index;
-        };
         if (builtin.mode == .Debug) {
             if (prev_index_opt) |prev_index| {
                 if (cursor.index == prev_index) {
                     return error.WouldLoop;
                 }
             }
+        }
+        if (builtin.mode == .Debug) {
+            prev_index_opt = cursor.index;
+        }
+
+        switch (token.kind) {
+            .newline, .section_break, .spaces => cursor.commit(loop_cursor),
+
+            .heading => _ = try parseHeading(&cursor),
+            .marker => _ = try parseList(&cursor),
+            .text => _ = try parseText(&cursor),
+            .quote => _ = try parseQuote(&cursor),
         }
     }
 
@@ -103,6 +104,27 @@ pub fn parseHeading(parent: *Cursor) !?void {
     _ = try parseText(&cursor);
     _ = parseExpectToken(&cursor, .section_break);
     try cursor.append(.close_heading);
+
+    parent.commit(cursor);
+}
+
+pub fn parseQuote(parent: *Cursor) !?void {
+    var cursor = parent.copy();
+    _ = parseExpectToken(&cursor, .quote) orelse return null;
+
+    // Reset
+    cursor = parent.copy();
+    try cursor.append(.start_quote);
+    while (true) {
+        _ = parseExpectToken(&cursor, .quote) orelse break;
+        _ = parseExpectToken(&cursor, .spaces);
+        _ = try parseText(&cursor);
+        _ = parseExpectToken(&cursor, .newline);
+        if (parseExpectToken(&cursor, .section_break)) |_| {
+            break;
+        }
+    }
+    try cursor.append(.close_quote);
 
     parent.commit(cursor);
 }
@@ -221,6 +243,7 @@ pub fn parseText(parent: *Cursor) !?void {
             .spaces,
             .heading,
             .marker,
+            .quote,
             => break,
 
             .newline => {},
@@ -259,6 +282,7 @@ pub const Token = struct {
         heading,
         marker,
         spaces,
+        quote,
     };
 };
 
@@ -308,6 +332,11 @@ pub fn parseToken(parent: *Cursor) ?Token {
                     res.kind = .heading;
                     res.end = index + 1;
                     state = .heading;
+                },
+                '>' => {
+                    res.kind = .quote;
+                    res.end = index + 1;
+                    break;
                 },
                 else => {
                     res.kind = .text;
@@ -443,7 +472,6 @@ test "quote" {
 }
 
 test "quote" {
-    if (true) return error.SkipZigTest;
     try testParse(
         \\> This is a block
         \\quote.
