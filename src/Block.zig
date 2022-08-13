@@ -487,7 +487,6 @@ test "list item" {
 }
 
 test "list item" {
-    if (true) return error.SkipZigTest;
     try testParse(
         \\1.  This is a
         \\list item.
