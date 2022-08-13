@@ -119,6 +119,7 @@ pub const Event = union(enum) {
             .close_emphasis,
             .close_link,
             .thematic_break,
+            .hard_break,
             => true,
         };
     }
@@ -157,6 +158,7 @@ pub const Event = union(enum) {
             .close_emphasis,
             .close_link,
             .thematic_break,
+            .hard_break,
             => try writer.print("{s}", .{std.meta.tagName(this)}),
         }
     }
@@ -1242,4 +1244,8 @@ fn dumpParseTestCase(events: []const Event, expected: []const Event) void {
 fn beep(src: std.builtin.SourceLocation, input: anytype) @TypeOf(input) {
     std.debug.print("{s}:{} {}\n", .{ src.fn_name, src.line, input });
     return input;
+}
+
+comptime {
+    _ = @import("./Block.zig");
 }
