@@ -254,7 +254,7 @@ fn parseThematicBreak(start_cursor: Cursor) ?Cursor.TokenIndex {
             else => return null,
         }
     }
-    if (num_chars >= 4) {
+    if (num_chars >= 3) {
         return cursor.token_index;
     }
     return null;

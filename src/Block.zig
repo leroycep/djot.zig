@@ -2,24 +2,31 @@ const std = @import("std");
 const builtin = @import("builtin");
 const Marker = @import("./Marker.zig");
 
-const Event = union(enum) {
-    text: []const u8,
-    start_heading: u32,
-    close_heading,
+const Document = std.MultiArrayList(Event);
 
-    start_quote,
-    close_quote,
+const Event = struct {
+    kind: Kind,
+    source: SourceIndex,
 
-    /// Data is the text of the first marker
-    start_tight_list: []const u8,
-    close_tight_list,
+    const Kind = enum {
+        text,
+        start_heading,
+        close_heading,
 
-    /// Data is the text of the first marker
-    start_loose_list: []const u8,
-    close_loose_list,
+        start_quote,
+        close_quote,
 
-    start_list_item,
-    close_list_item,
+        /// Data is the text of the first marker
+        start_tight_list,
+        close_tight_list,
+
+        /// Data is the text of the first marker
+        start_loose_list,
+        close_loose_list,
+
+        start_list_item,
+        close_list_item,
+    };
 
     pub fn format(
         this: @This(),
@@ -29,34 +36,38 @@ const Event = union(enum) {
     ) !void {
         _ = fmt;
         _ = options;
-        switch (this) {
+        switch (this.kind) {
             .text,
-            .start_tight_list,
-            .start_loose_list,
-            => |text| try writer.print("{s} \"{}\"", .{ std.meta.tagName(this), std.zig.fmtEscapes(text) }),
-
-            .start_heading => |level| try writer.print("{s} {}", .{ std.meta.tagName(this), level }),
+            .start_heading,
+            .start_list_item,
+            => try writer.print("{s} \"{}\"", .{ std.meta.tagName(this.kind), std.zig.fmtEscapes(this.source.slice) }),
 
             // Events that are only tags just print the tag name
+            .start_tight_list,
+            .start_loose_list,
             .close_heading,
             .start_quote,
             .close_quote,
             .close_tight_list,
             .close_loose_list,
-            .start_list_item,
             .close_list_item,
-            => try writer.print("{s}", .{std.meta.tagName(this)}),
+            => try writer.print("{s}", .{std.meta.tagName(this.kind)}),
         }
     }
 };
 
-pub fn parse(allocator: std.mem.Allocator, source: [*:0]const u8) ![]Event {
-    var events = std.ArrayList(Event).init(allocator);
-    defer events.deinit();
+// TODO: Make this just a wrapper over a u32
+const SourceIndex = struct {
+    slice: []const u8,
+};
+
+pub fn parse(allocator: std.mem.Allocator, source: [*:0]const u8) !Document.Slice {
+    var document = std.MultiArrayList(Event){};
+    defer document.deinit(allocator);
 
     var cursor = Cursor{
         .source = source,
-        .out_buffer = &events,
+        .out_buffer = &document,
         .index = 0,
         .out_len = 0,
     };
@@ -82,62 +93,61 @@ pub fn parse(allocator: std.mem.Allocator, source: [*:0]const u8) ![]Event {
         switch (token.kind) {
             .newline, .section_break, .spaces => cursor.commit(loop_cursor),
 
-            .heading => _ = try parseHeading(&cursor),
-            .marker => _ = try parseList(&cursor),
-            .text => _ = try parseText(&cursor),
-            .quote => _ = try parseQuote(&cursor),
+            .heading => _ = try parseHeading(allocator, &cursor),
+            .marker => _ = try parseList(allocator, &cursor),
+            .text => _ = try parseText(allocator, &cursor),
+            .quote => _ = try parseQuote(allocator, &cursor),
         }
     }
 
-    events.items.len = cursor.out_len;
+    document.len = cursor.out_len;
 
-    return events.toOwnedSlice();
+    return document.toOwnedSlice();
 }
 
-pub fn parseHeading(parent: *Cursor) !?void {
+pub fn parseHeading(allocator: std.mem.Allocator, parent: *Cursor) !?void {
     var cursor = parent.copy();
     const token = parseExpectToken(&cursor, .heading) orelse return null;
-    const level = token.end - token.start;
 
-    try cursor.append(.{ .start_heading = level });
+    try cursor.append(allocator, .{ .kind = .start_heading, .source = .{ .slice = cursor.source[token.start..token.end] } });
     _ = parseExpectToken(&cursor, .spaces);
-    _ = try parseText(&cursor);
+    _ = try parseText(allocator, &cursor);
     _ = parseExpectToken(&cursor, .section_break);
-    try cursor.append(.close_heading);
+    try cursor.append(allocator, .{ .kind = .close_heading, .source = .{ .slice = cursor.source[0..0] } });
 
     parent.commit(cursor);
 }
 
-pub fn parseQuote(parent: *Cursor) !?void {
+pub fn parseQuote(allocator: std.mem.Allocator, parent: *Cursor) !?void {
     var cursor = parent.copy();
-    _ = parseExpectToken(&cursor, .quote) orelse return null;
+    const quote_token = parseExpectToken(&cursor, .quote) orelse return null;
 
     // Reset
     cursor = parent.copy();
-    try cursor.append(.start_quote);
+    try cursor.append(allocator, .{ .kind = .start_quote, .source = .{ .slice = cursor.source[quote_token.start..quote_token.end] } });
     while (true) {
         _ = parseExpectToken(&cursor, .quote) orelse break;
         _ = parseExpectToken(&cursor, .spaces);
-        _ = try parseText(&cursor);
+        _ = try parseText(allocator, &cursor);
         _ = parseExpectToken(&cursor, .newline);
         if (parseExpectToken(&cursor, .section_break)) |_| {
             break;
         }
     }
-    try cursor.append(.close_quote);
+    try cursor.append(allocator, .{ .kind = .close_quote, .source = .{ .slice = cursor.source[cursor.index..cursor.index] } });
 
     parent.commit(cursor);
 }
 
-pub fn parseList(parent: *Cursor) !?void {
+pub fn parseList(allocator: std.mem.Allocator, parent: *Cursor) !?void {
     var cursor = parent.copy();
 
     // Allocate a place for the start event; we'll have to update it once we know
     // whether it's a tight or loose list
     const start_event_idx = cursor.out_len;
-    try cursor.append(undefined);
+    try cursor.append(allocator, undefined);
 
-    const first_list_item = (try parseListItem(&cursor)) orelse return null;
+    const first_list_item = (try parseListItem(allocator, &cursor)) orelse return null;
 
     const list_marker = Marker.parse(cursor.source, first_list_item.marker).?;
 
@@ -151,7 +161,7 @@ pub fn parseList(parent: *Cursor) !?void {
     }
 
     var loop_cursor = cursor.copy();
-    while (try parseListItem(&loop_cursor)) |list_item| {
+    while (try parseListItem(allocator, &loop_cursor)) |list_item| {
         const style = Marker.parse(cursor.source, list_item.marker).?.style;
 
         if (style != list_style and list_style.isRoman() and style.isAlpha()) {
@@ -179,12 +189,14 @@ pub fn parseList(parent: *Cursor) !?void {
         }
     }
 
+    cursor.out_buffer.set(start_event_idx, .{
+        .kind = if (tight) .start_tight_list else .start_loose_list,
+        .source = .{ .slice = cursor.source[first_list_item.marker..first_list_item.marker] },
+    });
     if (tight) {
-        cursor.out_buffer.items.ptr[start_event_idx] = .{ .start_tight_list = cursor.source[first_list_item.marker..list_marker.end] };
-        try cursor.append(.close_tight_list);
+        try cursor.append(allocator, .{ .kind = .close_tight_list, .source = .{ .slice = cursor.source[cursor.index..cursor.index] } });
     } else {
-        cursor.out_buffer.items.ptr[start_event_idx] = .{ .start_loose_list = cursor.source[first_list_item.marker..list_marker.end] };
-        try cursor.append(.close_loose_list);
+        try cursor.append(allocator, .{ .kind = .close_loose_list, .source = .{ .slice = cursor.source[cursor.index..cursor.index] } });
     }
     parent.commit(cursor);
     return;
@@ -195,17 +207,18 @@ pub const ListItem = struct {
     tight: bool,
 };
 
-fn parseListItem(parent_cursor: *Cursor) !?ListItem {
+fn parseListItem(allocator: std.mem.Allocator, parent_cursor: *Cursor) !?ListItem {
     var cursor = parent_cursor.copy();
-    try cursor.append(.start_list_item);
 
     const marker = parseExpectToken(&cursor, .marker) orelse return null;
+
+    try cursor.append(allocator, .{ .kind = .start_list_item, .source = .{ .slice = cursor.source[marker.start..marker.end] } });
 
     // Remove any leading spaces
     _ = parseExpectToken(&cursor, .spaces);
 
     // Parse at least one bit of text
-    (try parseText(&cursor)) orelse return null;
+    (try parseText(allocator, &cursor)) orelse return null;
     var tight = true;
     while (true) {
         var loop_cursor = cursor;
@@ -215,14 +228,14 @@ fn parseListItem(parent_cursor: *Cursor) !?ListItem {
             tight = false;
         }
         _ = parseExpectToken(&loop_cursor, .spaces) orelse break;
-        if (try parseText(&loop_cursor)) |_| {
+        if (try parseText(allocator, &loop_cursor)) |_| {
             cursor.commit(loop_cursor);
             continue;
         }
         return error.Unimplemented;
     }
 
-    try cursor.append(.close_list_item);
+    try cursor.append(allocator, .{ .kind = .close_list_item, .source = .{ .slice = cursor.source[0..0] } });
     parent_cursor.commit(cursor);
     return ListItem{
         .marker = marker.start,
@@ -230,7 +243,7 @@ fn parseListItem(parent_cursor: *Cursor) !?ListItem {
     };
 }
 
-pub fn parseText(parent: *Cursor) !?void {
+pub fn parseText(allocator: std.mem.Allocator, parent: *Cursor) !?void {
     const first_text = parseExpectToken(parent, .text) orelse return null;
 
     const start_index = first_text.start;
@@ -255,7 +268,7 @@ pub fn parseText(parent: *Cursor) !?void {
         }
     }
 
-    try parent.append(.{ .text = parent.source[start_index..end_index] });
+    try parent.append(allocator, .{ .kind = .text, .source = .{ .slice = parent.source[start_index..end_index] } });
 
     return;
 }
@@ -379,7 +392,7 @@ pub fn parseToken(parent: *Cursor) ?Token {
 
 const Cursor = struct {
     source: [*:0]const u8,
-    out_buffer: *std.ArrayList(Event),
+    out_buffer: *Document,
     index: u32,
     out_len: u32,
 
@@ -392,14 +405,10 @@ const Cursor = struct {
         };
     }
 
-    pub fn append(this: *@This(), event: Event) !void {
-        try this.appendSlice(&.{event});
-    }
-
-    pub fn appendSlice(this: *@This(), events: []const Event) !void {
-        try this.out_buffer.ensureTotalCapacity(this.out_len + events.len);
-        std.mem.copy(Event, this.out_buffer.items.ptr[this.out_len..this.out_buffer.capacity][0..events.len], events);
-        this.out_len += @intCast(u32, events.len);
+    pub fn append(this: *@This(), allocator: std.mem.Allocator, event: Event) !void {
+        try this.out_buffer.resize(allocator, this.out_len + 1);
+        this.out_buffer.set(this.out_len, event);
+        this.out_len += 1;
     }
 
     // Updates another Parser
@@ -414,13 +423,13 @@ test "heading" {
         \\## A level _two_ heading
         \\
     , &.{
-        .{ .start_heading = 2 },
+        .{ .start_heading = "##" },
         .{ .text = "A level _two_ heading" },
         .close_heading,
     });
 }
 
-test "heading" {
+test "heading that takes up three lines" {
     try testParse(
         \\## A heading that
         \\takes up
@@ -428,7 +437,7 @@ test "heading" {
         \\
         \\A paragraph, finally.
     , &.{
-        .{ .start_heading = 2 },
+        .{ .start_heading = "##" },
         .{ .text = 
         \\A heading that
         \\takes up
@@ -441,8 +450,7 @@ test "heading" {
     });
 }
 
-test "quote" {
-    if (true) return error.SkipZigTest;
+test "quote with a list in it" {
     try testParse(
         \\> This is a block quote.
         \\>
@@ -451,16 +459,16 @@ test "quote" {
     , &.{
         .start_quote,
         .{ .text = 
-        \\This is a blockquote.
+        \\This is a block quote.
         },
 
-        .{ .start_tight_list = "1" },
-        .start_list_item,
+        .start_tight_list,
+        .{ .start_list_item = "1. " },
         .{ .text = 
         \\with a
         },
         .close_list_item,
-        .start_list_item,
+        .{ .start_list_item = "2. " },
         .{ .text = 
         \\list in it
         },
@@ -471,7 +479,7 @@ test "quote" {
     });
 }
 
-test "quote" {
+test "quote 2" {
     try testParse(
         \\> This is a block
         \\quote.
@@ -485,7 +493,7 @@ test "quote" {
     });
 }
 
-test "list item" {
+test "list item containing a block quote" {
     if (true) return error.SkipZigTest;
     try testParse(
         \\1.  This is a
@@ -514,7 +522,7 @@ test "list item" {
     });
 }
 
-test "list item" {
+test "list item with second paragraph" {
     try testParse(
         \\1.  This is a
         \\list item.
@@ -522,9 +530,9 @@ test "list item" {
         \\  Second paragraph under the
         \\list item.
     , &.{
-        .{ .start_loose_list = "1. " },
+        .start_loose_list,
 
-        .start_list_item,
+        .{ .start_list_item = "1. " },
         .{ .text = 
         \\This is a
         \\list item.
@@ -539,33 +547,33 @@ test "list item" {
     });
 }
 
-test "list" {
+test "4 lists" {
     try testParse(
         \\i) one
         \\i. one (style change)
         \\+ bullet
         \\* bullet (style change)
     , &.{
-        .{ .start_tight_list = "i) " },
-        .start_list_item,
+        .start_tight_list,
+        .{ .start_list_item = "i) " },
         .{ .text = "one" },
         .close_list_item,
         .close_tight_list,
 
-        .{ .start_tight_list = "i. " },
-        .start_list_item,
+        .start_tight_list,
+        .{ .start_list_item = "i. " },
         .{ .text = "one (style change)" },
         .close_list_item,
         .close_tight_list,
 
-        .{ .start_tight_list = "+ " },
-        .start_list_item,
+        .start_tight_list,
+        .{ .start_list_item = "+ " },
         .{ .text = "bullet" },
         .close_list_item,
         .close_tight_list,
 
-        .{ .start_tight_list = "* " },
-        .start_list_item,
+        .start_tight_list,
+        .{ .start_list_item = "* " },
         .{ .text = "bullet (style change)" },
         .close_list_item,
         .close_tight_list,
@@ -577,13 +585,13 @@ test "list: alpha/roman ambiguous" {
         \\i. item
         \\j. next item
     , &.{
-        .{ .start_tight_list = "i. " },
+        .start_tight_list,
 
-        .start_list_item,
+        .{ .start_list_item = "i. " },
         .{ .text = "item" },
         .close_list_item,
 
-        .start_list_item,
+        .{ .start_list_item = "j. " },
         .{ .text = "next item" },
         .close_list_item,
 
@@ -596,13 +604,13 @@ test "list: start number" {
         \\5) five
         \\8) six
     , &.{
-        .{ .start_tight_list = "5) " },
+        .start_tight_list,
 
-        .start_list_item,
+        .{ .start_list_item = "5) " },
         .{ .text = "five" },
         .close_list_item,
 
-        .start_list_item,
+        .{ .start_list_item = "8) " },
         .{ .text = "six" },
         .close_list_item,
 
@@ -616,13 +624,13 @@ test "loose list" {
         \\
         \\- two
     , &.{
-        .{ .start_loose_list = "- " },
+        .start_loose_list,
 
-        .start_list_item,
+        .{ .start_list_item = "- " },
         .{ .text = "one" },
         .close_list_item,
 
-        .start_list_item,
+        .{ .start_list_item = "- " },
         .{ .text = "two" },
         .close_list_item,
 
@@ -630,9 +638,56 @@ test "loose list" {
     });
 }
 
-fn testParse(source: [*:0]const u8, expected: []const Event) !void {
-    const parsed = try parse(std.testing.allocator, source);
-    defer std.testing.allocator.free(parsed);
+const TestEvent = union(enum) {
+    text: []const u8,
+    start_heading: []const u8,
+    close_heading,
+
+    start_quote,
+    close_quote,
+
+    /// Data is the text of the first marker
+    start_tight_list,
+    close_tight_list,
+
+    /// Data is the text of the first marker
+    start_loose_list,
+    close_loose_list,
+
+    start_list_item: []const u8,
+    close_list_item,
+
+    pub fn format(
+        this: @This(),
+        comptime fmt: []const u8,
+        options: std.fmt.FormatOptions,
+        writer: anytype,
+    ) !void {
+        _ = fmt;
+        _ = options;
+        switch (this) {
+            .text,
+            .start_list_item,
+            .start_heading,
+            => |text| try writer.print("{s} \"{}\"", .{ std.meta.tagName(this), std.zig.fmtEscapes(text) }),
+
+            // Events that are only tags just print the tag name
+            .close_heading,
+            .start_quote,
+            .close_quote,
+            .start_tight_list,
+            .close_tight_list,
+            .start_loose_list,
+            .close_loose_list,
+            .close_list_item,
+            => try writer.print("{s}", .{std.meta.tagName(this)}),
+        }
+    }
+};
+
+fn testParse(source: [*:0]const u8, expected: []const TestEvent) !void {
+    var parsed = try parse(std.testing.allocator, source);
+    defer parsed.deinit(std.testing.allocator);
 
     var expected_text = std.ArrayList(u8).init(std.testing.allocator);
     defer expected_text.deinit();
@@ -642,8 +697,12 @@ fn testParse(source: [*:0]const u8, expected: []const Event) !void {
 
     var parsed_text = std.ArrayList(u8).init(std.testing.allocator);
     defer parsed_text.deinit();
-    for (parsed) |parsed_block| {
-        try parsed_text.writer().print("{}\n", .{parsed_block});
+    var i: usize = 0;
+    while (i < parsed.len) : (i += 1) {
+        try parsed_text.writer().print("{}\n", .{Event{
+            .kind = parsed.items(.kind)[i],
+            .source = parsed.items(.source)[i],
+        }});
     }
 
     try std.testing.expectEqualStrings(expected_text.items, parsed_text.items);
