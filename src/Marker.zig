@@ -91,7 +91,7 @@ fn parseEnclosedMarker(source: [*:0]const u8, start_index: u32) ?Marker {
     const text = parseOrderedMarkerText(source, index) orelse return null;
     index = text.end;
 
-    incrementIfString(source, &index, ") ") orelse return null;
+    incrementIfCharacter(source, &index, ')') orelse return null;
 
     return Marker{
         .style = switch (text.style) {
@@ -108,7 +108,7 @@ fn parseEnclosedMarker(source: [*:0]const u8, start_index: u32) ?Marker {
 fn parseDefinitionMarker(source: [*:0]const u8, start_index: u32) ?Marker {
     var index = start_index;
     incrementIfCharacter(source, &index, ':') orelse return null;
-    incrementIfInList(source, &index, " \n") orelse return null;
+    //incrementIfInList(source, &index, " \n") orelse return null;
     return Marker{
         .style = .definition,
         .end = index,
@@ -138,7 +138,7 @@ fn parseBulletMarker(source: [*:0]const u8, start_index: u32) ?Marker {
         };
     }
 
-    incrementIfInList(source, &index, " \n") orelse return null;
+    //incrementIfInList(source, &index, " \n") orelse return null;
 
     return Marker{
         .style = style,
@@ -152,7 +152,7 @@ fn incrementIfCheckBox(source: [*:0]const u8, index: *u32) ?void {
     incrementIfCharacter(source, &i, '[') orelse return null;
     incrementIfInList(source, &i, " xX") orelse return null;
     incrementIfCharacter(source, &i, ']') orelse return null;
-    incrementIfInList(source, &i, " \n") orelse return null;
+    //incrementIfInList(source, &i, " \n") orelse return null;
     index.* = i;
 }
 
@@ -167,7 +167,7 @@ fn parseOrderedMarker(source: [*:0]const u8, start_index: u32) ?Marker {
     };
     index += 1;
 
-    incrementIfInList(source, &index, " \n") orelse return null;
+    //incrementIfInList(source, &index, " \n") orelse return null;
 
     if (is_period) {
         return Marker{
@@ -304,28 +304,28 @@ fn expectParseStyle(source: [*:0]const u8, expected: Style) !void {
 }
 
 test "parse text" {
-    try expectParseText(": definition", ": ");
-    try expectParseText("- hyphen", "- ");
-    try expectParseText("+ plus", "+ ");
-    try expectParseText("* asterisk", "* ");
-    try expectParseText("- [ ] hyphen_task", "- [ ] ");
-    try expectParseText("+ [ ] plus_task", "+ [ ] ");
-    try expectParseText("* [ ] asterisk_task", "* [ ] ");
-    try expectParseText("1. decimal_period", "1. ");
-    try expectParseText("2) decimal_paren", "2) ");
-    try expectParseText("(3) decimal_paren_enclosed", "(3) ");
-    try expectParseText("a. lower_alpha_period", "a. ");
-    try expectParseText("b) lower_alpha_paren", "b) ");
-    try expectParseText("(c) lower_alpha_paren_enclosed", "(c) ");
-    try expectParseText("D. upper_alpha_period", "D. ");
-    try expectParseText("E) upper_alpha_paren", "E) ");
-    try expectParseText("(F) upper_alpha_paren_enclosed", "(F) ");
-    try expectParseText("i. lower_roman_period", "i. ");
-    try expectParseText("ii) lower_roman_paren", "ii) ");
-    try expectParseText("(iii) lower_roman_paren_enclosed", "(iii) ");
-    try expectParseText("IV. upper_roman_period", "IV. ");
-    try expectParseText("V) upper_roman_paren", "V) ");
-    try expectParseText("(VI) upper_roman_paren_enclosed", "(VI) ");
+    try expectParseText(": definition", ":");
+    try expectParseText("- hyphen", "-");
+    try expectParseText("+ plus", "+");
+    try expectParseText("* asterisk", "*");
+    try expectParseText("- [ ] hyphen_task", "- [ ]");
+    try expectParseText("+ [ ] plus_task", "+ [ ]");
+    try expectParseText("* [ ] asterisk_task", "* [ ]");
+    try expectParseText("1. decimal_period", "1.");
+    try expectParseText("2) decimal_paren", "2)");
+    try expectParseText("(3) decimal_paren_enclosed", "(3)");
+    try expectParseText("a. lower_alpha_period", "a.");
+    try expectParseText("b) lower_alpha_paren", "b)");
+    try expectParseText("(c) lower_alpha_paren_enclosed", "(c)");
+    try expectParseText("D. upper_alpha_period", "D.");
+    try expectParseText("E) upper_alpha_paren", "E)");
+    try expectParseText("(F) upper_alpha_paren_enclosed", "(F)");
+    try expectParseText("i. lower_roman_period", "i.");
+    try expectParseText("ii) lower_roman_paren", "ii)");
+    try expectParseText("(iii) lower_roman_paren_enclosed", "(iii)");
+    try expectParseText("IV. upper_roman_period", "IV.");
+    try expectParseText("V) upper_roman_paren", "V)");
+    try expectParseText("(VI) upper_roman_paren_enclosed", "(VI)");
 }
 
 fn expectParseText(source: [*:0]const u8, expected: []const u8) !void {

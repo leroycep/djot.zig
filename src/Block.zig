@@ -31,7 +31,6 @@ const Event = struct {
         start_list: List,
 
         const List = struct {
-            tight: bool,
             style: Marker.Style,
         };
     };
@@ -51,8 +50,7 @@ const Event = struct {
             .start_list_item,
             => try writer.print(" \"{}\"", .{std.zig.fmtEscapes(this.source.slice)}),
 
-            .start_list => try writer.print(" {s} {s}", .{
-                if (this.extra.start_list.tight) "tight" else "loose",
+            .start_list => try writer.print(" {s}", .{
                 std.meta.tagName(this.extra.start_list.style),
             }),
 
@@ -73,11 +71,16 @@ const SourceIndex = struct {
     slice: []const u8,
 };
 
+const Error = std.mem.Allocator.Error || error{
+    // TODO: Remove this
+    WouldLoop,
+};
+
 const EventIndex = struct {
     index: u32,
 };
 
-pub fn parse(allocator: std.mem.Allocator, source: [*:0]const u8) !Document.Slice {
+pub fn parse(allocator: std.mem.Allocator, source: [*:0]const u8) Error!Document.Slice {
     var document = std.MultiArrayList(Event){};
     defer document.deinit(allocator);
 
@@ -88,103 +91,161 @@ pub fn parse(allocator: std.mem.Allocator, source: [*:0]const u8) !Document.Slic
         .out_len = 0,
     };
 
-    // for debugging
-    var prev_index_opt: ?u32 = null;
-
-    var loop_cursor = cursor.copy();
-    while (parseToken(&loop_cursor)) |token| : (loop_cursor = cursor.copy()) {
-        // TODO: Panic once everything is supposed to be implemented
-        //std.debug.panic("This is a bug in djot.zig: all types of lines should be handled", .{});
-        if (builtin.mode == .Debug) {
-            if (prev_index_opt) |prev_index| {
-                if (cursor.index == prev_index) {
-                    return error.WouldLoop;
-                }
-            }
-        }
-        if (builtin.mode == .Debug) {
-            prev_index_opt = cursor.index;
-        }
-
-        switch (token.kind) {
-            .newline => {
-                try loop_cursor.append(allocator, .{ .kind = .text_break, .source = .{ .slice = source[token.start..token.end] } });
-                cursor.commit(loop_cursor);
-            },
-            .spaces => cursor.commit(loop_cursor),
-
-            .heading => _ = try parseHeading(allocator, &cursor),
-            .marker => _ = try parseList(allocator, &cursor),
-            .text => _ = try parseText(allocator, &cursor),
-            .quote => _ = try parseQuote(allocator, &cursor),
-        }
-    }
+    _ = try parseBlocks(allocator, &cursor, null);
 
     document.len = cursor.out_len;
 
     return document.toOwnedSlice();
 }
 
-pub fn parseHeading(allocator: std.mem.Allocator, parent: *Cursor) !?void {
+const Prefix = struct {
+    prev: ?*const Prefix = null,
+    token: Token.Kind,
+
+    pub fn parsePrefix(this: @This(), parent: *Cursor) ?void {
+        var cursor = parent.copy();
+        if (this.prev) |prev| prev.parsePrefix(&cursor) orelse return null;
+        _ = parseExpectToken(&cursor, this.token) orelse return null;
+        parent.commit(cursor);
+        return;
+    }
+
+    pub fn parsePrefixVisible(this: @This(), parent: *Cursor) ?void {
+        var cursor = parent.copy();
+        if (this.prev) |prev| prev.parsePrefix(&cursor) orelse return null;
+        if (this.token == .space) {
+            _ = parseExpectToken(&cursor, this.token);
+        } else {
+            _ = parseExpectToken(&cursor, this.token) orelse return null;
+        }
+        parent.commit(cursor);
+        return;
+    }
+
+    pub fn dump(this: @This()) void {
+        if (this.prev) |prev| {
+            prev.dump();
+        }
+        std.debug.print("{s}|", .{std.meta.tagName(this.token)});
+    }
+};
+
+pub fn parseBlocks(allocator: std.mem.Allocator, parent: *Cursor, prefix: ?*const Prefix) Error!bool {
+    var cursor = parent.copy();
+
+    var prev_index = cursor.index;
+    var was_break = false;
+
+    while (true) {
+        var peek_cursor = cursor.copy();
+
+        blk: {
+            if (prefix) |p| {
+                p.parsePrefixVisible(&peek_cursor) orelse break :blk;
+            }
+            _ = parseExpectToken(&peek_cursor, .newline) orelse break :blk;
+            was_break = true;
+            cursor.commit(peek_cursor);
+            continue;
+        }
+
+        if (try parseList(allocator, &cursor, prefix)) |_| {
+            continue;
+        }
+
+        peek_cursor = cursor.copy();
+
+        const source = std.mem.span(cursor.source);
+        if (prefix) |p| {
+            p.parsePrefix(&peek_cursor) orelse break;
+            cursor.commit(peek_cursor);
+        }
+
+        while (parseExpectToken(&peek_cursor, .space)) |_| {}
+
+        const token = parseToken(&peek_cursor) orelse break;
+
+        switch (token.kind) {
+            .newline => was_break = true,
+            .heading => _ = try parseHeading(allocator, &cursor),
+            .marker => unreachable,
+            .text => {
+                if (was_break) {
+                    _ = try peek_cursor.append(allocator, .{ .kind = .text_break, .source = .{ .slice = cursor.source[cursor.index..peek_cursor.index] } });
+                    was_break = false;
+                }
+                _ = try parseText(allocator, &cursor);
+            },
+            .quote => _ = try parseQuote(allocator, &cursor, prefix),
+            .space => unreachable,
+        }
+
+        if (cursor.index == prev_index) {
+            std.debug.print("source = \"{}\"\n", .{std.zig.fmtEscapes(source[cursor.index..])});
+            std.debug.print("events = {any}\n", .{cursor.out_buffer.items(.kind)});
+            return error.WouldLoop;
+        }
+        prev_index = cursor.index;
+    }
+
+    const was_content = cursor.out_len > parent.out_len;
+
+    parent.commit(cursor);
+    return was_content;
+}
+
+pub fn parseHeading(allocator: std.mem.Allocator, parent: *Cursor) Error!?void {
     var cursor = parent.copy();
     const token = parseExpectToken(&cursor, .heading) orelse return null;
+    _ = parseExpectToken(&cursor, .space);
 
-    try cursor.append(allocator, .{ .kind = .start_heading, .source = .{ .slice = cursor.source[token.start..token.end] } });
-    _ = parseExpectToken(&cursor, .spaces);
+    _ = try cursor.append(allocator, .{ .kind = .start_heading, .source = .{ .slice = cursor.source[token.start..token.end] } });
     _ = try parseText(allocator, &cursor);
+    _ = try cursor.append(allocator, .{ .kind = .close_heading, .source = .{ .slice = cursor.source[0..0] } });
     _ = parseExpectToken(&cursor, .newline);
-    try cursor.append(allocator, .{ .kind = .close_heading, .source = .{ .slice = cursor.source[0..0] } });
 
     parent.commit(cursor);
 }
 
-pub fn parseQuote(allocator: std.mem.Allocator, parent: *Cursor) !?void {
+pub fn parseQuote(allocator: std.mem.Allocator, parent: *Cursor, prefix: ?*const Prefix) Error!?void {
     var cursor = parent.copy();
     const quote_token = parseExpectToken(&cursor, .quote) orelse return null;
-
-    // Reset
     cursor = parent.copy();
-    try cursor.append(allocator, .{ .kind = .start_quote, .source = .{ .slice = cursor.source[quote_token.start..quote_token.end] } });
-    while (true) {
-        _ = parseExpectToken(&cursor, .quote) orelse break;
-        _ = parseExpectToken(&cursor, .spaces);
-        _ = try parseText(allocator, &cursor);
-        if (parseExpectToken(&cursor, .newline)) |_| {
-            break;
-        }
-    }
-    try cursor.append(allocator, .{ .kind = .close_quote, .source = .{ .slice = cursor.source[cursor.index..cursor.index] } });
+
+    _ = try cursor.append(allocator, .{ .kind = .start_quote, .source = .{ .slice = cursor.source[quote_token.start..quote_token.end] } });
+    _ = try parseBlocks(allocator, &cursor, &.{ .prev = &.{ .prev = prefix, .token = .quote }, .token = .space });
+    _ = try cursor.append(allocator, .{ .kind = .close_quote, .source = .{ .slice = cursor.source[cursor.index..cursor.index] } });
 
     parent.commit(cursor);
 }
 
-pub fn parseList(allocator: std.mem.Allocator, parent: *Cursor) !?void {
+pub fn parseList(allocator: std.mem.Allocator, parent: *Cursor, prefix: ?*const Prefix) Error!?void {
     var cursor = parent.copy();
 
     // Allocate a place for the start event; we'll have to update it once we know
     // whether it's a tight or loose list
-    const start_event_idx = cursor.out_len;
-    try cursor.append(allocator, .{
+    const start_event = try cursor.append(allocator, .{
         .kind = .start_list,
         .source = .{ .slice = cursor.source[cursor.index..cursor.index] },
-        .extra = Event.Extra{ .start_list = .{ .tight = true, .style = undefined } },
+        .extra = Event.Extra{ .start_list = .{ .style = undefined } },
     });
 
-    const first_list_item = (try parseListItem(allocator, &cursor)) orelse return null;
+    const first_list_item = (try parseListItem(allocator, &cursor, prefix)) orelse return null;
 
-    const list_marker = Marker.parse(cursor.source, first_list_item.marker).?;
+    const list_marker = Marker.parse(cursor.source, @intCast(u32, @ptrToInt(cursor.out_buffer.items(.source)[first_list_item.index].slice.ptr) - @ptrToInt(cursor.source))).?;
 
     var list_style = list_marker.style;
     var next_item_would_make_loose = false;
-    var tight = first_list_item.tight;
+    var tight = true;
 
     if (parseExpectToken(&cursor, .newline)) |_| {
         next_item_would_make_loose = true;
     }
 
     var loop_cursor = cursor.copy();
-    while (try parseListItem(allocator, &loop_cursor)) |list_item| {
-        const style = Marker.parse(cursor.source, list_item.marker).?.style;
+    while (try parseListItem(allocator, &loop_cursor, prefix)) |list_item| {
+        const item_marker = Marker.parse(loop_cursor.source, @intCast(u32, @ptrToInt(loop_cursor.out_buffer.items(.source)[list_item.index].slice.ptr) - @ptrToInt(loop_cursor.source))).?;
+        const style = item_marker.style;
 
         if (style != list_style and list_style.isRoman() and style.isAlpha()) {
             if (style != list_style.romanToAlpha()) break;
@@ -199,9 +260,6 @@ pub fn parseList(allocator: std.mem.Allocator, parent: *Cursor) !?void {
         if (next_item_would_make_loose) {
             tight = false;
         }
-        if (!list_item.tight) {
-            tight = false;
-        }
 
         cursor.commit(loop_cursor);
 
@@ -210,73 +268,61 @@ pub fn parseList(allocator: std.mem.Allocator, parent: *Cursor) !?void {
         }
     }
 
-    cursor.out_buffer.items(.extra)[start_event_idx] = Event.Extra{
+    cursor.out_buffer.items(.extra)[start_event.index] = Event.Extra{
         .start_list = .{
-            .tight = tight,
             .style = list_style,
         },
     };
-    try cursor.append(allocator, .{ .kind = .close_list, .source = .{ .slice = cursor.source[cursor.index..cursor.index] } });
+    _ = try cursor.append(allocator, .{ .kind = .close_list, .source = .{ .slice = cursor.source[cursor.index..cursor.index] } });
     parent.commit(cursor);
     return;
 }
 
-pub const ListItem = struct {
-    marker: u32,
-    tight: bool,
-};
-
-fn parseListItem(allocator: std.mem.Allocator, parent_cursor: *Cursor) !?ListItem {
+fn parseListItem(allocator: std.mem.Allocator, parent_cursor: *Cursor, prefix: ?*const Prefix) Error!?EventIndex {
     var cursor = parent_cursor.copy();
 
-    const marker = parseExpectToken(&cursor, .marker) orelse return null;
-
-    try cursor.append(allocator, .{ .kind = .start_list_item, .source = .{ .slice = cursor.source[marker.start..marker.end] } });
-
-    // Remove any leading spaces
-    _ = parseExpectToken(&cursor, .spaces);
-
-    // Parse at least one bit of text
-    (try parseText(allocator, &cursor)) orelse return null;
-    var tight = true;
-    while (true) {
-        var loop_cursor = cursor;
-        // If there is a newline or a section break, skip it
-        if (parseExpectToken(&loop_cursor, .newline)) |token| {
-            try loop_cursor.append(allocator, .{ .kind = .text_break, .source = .{ .slice = cursor.source[token.start..token.end] } });
-            tight = false;
-        }
-        _ = parseExpectToken(&loop_cursor, .spaces) orelse break;
-        if (try parseText(allocator, &loop_cursor)) |_| {
-            cursor.commit(loop_cursor);
-            continue;
-        }
-        return error.Unimplemented;
+    if (prefix) |p| {
+        p.parsePrefix(&cursor) orelse return null;
     }
 
-    try cursor.append(allocator, .{ .kind = .close_list_item, .source = .{ .slice = cursor.source[0..0] } });
+    while (parseExpectToken(&cursor, .space)) |_| {}
+
+    const marker = parseExpectToken(&cursor, .marker) orelse return null;
+    _ = parseExpectToken(&cursor, .space) orelse return null;
+
+    const event_index = try cursor.append(allocator, .{ .kind = .start_list_item, .source = .{ .slice = cursor.source[marker.start..marker.end] } });
+
+    _ = try parseText(allocator, &cursor);
+
+    {
+        var temp = cursor.copy();
+        _ = try temp.append(allocator, .{ .kind = .text_break, .source = .{ .slice = cursor.source[marker.start..marker.end] } });
+        if (try parseBlocks(allocator, &temp, &.{ .prev = prefix, .token = .space })) {
+            cursor.commit(temp);
+        }
+    }
+
+    _ = try cursor.append(allocator, .{ .kind = .close_list_item, .source = .{ .slice = cursor.source[0..0] } });
     parent_cursor.commit(cursor);
-    return ListItem{
-        .marker = marker.start,
-        .tight = tight,
-    };
+    return event_index;
 }
 
 pub fn parseText(allocator: std.mem.Allocator, parent: *Cursor) !?void {
-    const first_text = parseExpectToken(parent, .text) orelse return null;
+    var blank = true;
 
-    const start_index = first_text.start;
-    var end_index = first_text.end;
+    const start_index = parent.index;
+    var end_index = start_index;
 
     var cursor = parent.copy();
     var last_was_newline = false;
     while (parseToken(&cursor)) |token| {
         switch (token.kind) {
-            .spaces,
             .heading,
             .marker,
             .quote,
             => break,
+
+            .space => {},
 
             .newline => {
                 if (last_was_newline) break;
@@ -286,6 +332,7 @@ pub fn parseText(allocator: std.mem.Allocator, parent: *Cursor) !?void {
             },
 
             .text => {
+                blank = false;
                 last_was_newline = false;
                 end_index = token.end;
                 parent.commit(cursor);
@@ -293,7 +340,9 @@ pub fn parseText(allocator: std.mem.Allocator, parent: *Cursor) !?void {
         }
     }
 
-    try parent.append(allocator, .{ .kind = .text, .source = .{ .slice = parent.source[start_index..end_index] } });
+    if (blank) return null;
+
+    _ = try parent.append(allocator, .{ .kind = .text, .source = .{ .slice = parent.source[start_index..end_index] } });
 
     return;
 }
@@ -318,15 +367,19 @@ pub const Token = struct {
         text,
         heading,
         marker,
-        spaces,
+        space,
         quote,
     };
 };
 
 pub fn parseToken(parent: *Cursor) ?Token {
     if (parent.source[parent.index] == 0) return null;
-    if (Marker.parse(parent.source, parent.index)) |marker| {
+    if (Marker.parse(parent.source, parent.index)) |marker| blk: {
         const start = parent.index;
+        // Only allow alpha numeric characters with a single character
+        if (marker.style.isAlpha() and marker.end - start > 2) {
+            break :blk;
+        }
         parent.index = marker.end;
         return Token{
             .start = start,
@@ -353,15 +406,15 @@ pub fn parseToken(parent: *Cursor) ?Token {
     while (parent.source[index] != 0) : (index += 1) {
         switch (state) {
             .default => switch (parent.source[index]) {
-                ' ' => {
-                    res.kind = .spaces;
-                    res.end = index + 1;
-                    state = .spaces;
-                },
                 '#' => {
                     res.kind = .heading;
                     res.end = index + 1;
                     state = .heading;
+                },
+                ' ' => {
+                    res.kind = .space;
+                    res.end = index + 1;
+                    break;
                 },
                 '\n' => {
                     res.kind = .newline;
@@ -415,10 +468,12 @@ const Cursor = struct {
         };
     }
 
-    pub fn append(this: *@This(), allocator: std.mem.Allocator, event: Event) !void {
+    pub fn append(this: *@This(), allocator: std.mem.Allocator, event: Event) !EventIndex {
+        const index = EventIndex{ .index = this.out_len };
         try this.out_buffer.resize(allocator, this.out_len + 1);
-        this.out_buffer.set(this.out_len, event);
         this.out_len += 1;
+        this.out_buffer.set(index.index, event);
+        return index;
     }
 
     // Updates another Parser
@@ -477,17 +532,16 @@ test "quote with a list in it" {
         \\
         },
 
-        .{ .start_list = .{ .tight = true, .style = .decimal_period } },
-        .{ .start_list_item = "1. " },
+        .{ .start_list = .{ .style = .decimal_period } },
+        .{ .start_list_item = "1." },
         .{ .text = 
         \\with a
         \\
         },
         .close_list_item,
-        .{ .start_list_item = "2. " },
+        .{ .start_list_item = "2." },
         .{ .text = 
         \\list in it
-        \\
         },
         .close_list_item,
         .close_list,
@@ -518,14 +572,14 @@ test "list item containing a block quote" {
         \\
         \\ > containing a block quote
     , &.{
-        .{ .start_list = .{ .tight = false, .style = .decimal_period } },
+        .{ .start_list = .{ .style = .decimal_period } },
 
-        .start_list_item,
+        .{ .start_list_item = "1." },
         .{ .text = 
-        \\This is a
+        \\ This is a
         },
         .{ .text = 
-        \\list item.
+        \\ list item.
         },
 
         .start_quote,
@@ -547,17 +601,17 @@ test "list item with second paragraph" {
         \\  Second paragraph under the
         \\list item.
     , &.{
-        .{ .start_list = .{ .tight = false, .style = .decimal_period } },
+        .{ .start_list = .{ .style = .decimal_period } },
 
-        .{ .start_list_item = "1. " },
+        .{ .start_list_item = "1." },
         .{ .text = 
-        \\This is a
+        \\ This is a
         \\list item.
         \\
         },
         .text_break,
         .{ .text = 
-        \\Second paragraph under the
+        \\ Second paragraph under the
         \\list item.
         },
         .close_list_item,
@@ -573,8 +627,8 @@ test "4 lists" {
         \\+ bullet
         \\* bullet (style change)
     , &.{
-        .{ .start_list = .{ .tight = true, .style = .lower_roman_paren } },
-        .{ .start_list_item = "i) " },
+        .{ .start_list = .{ .style = .lower_roman_paren } },
+        .{ .start_list_item = "i)" },
         .{ .text = 
         \\one
         \\
@@ -582,8 +636,8 @@ test "4 lists" {
         .close_list_item,
         .close_list,
 
-        .{ .start_list = .{ .tight = true, .style = .lower_roman_period } },
-        .{ .start_list_item = "i. " },
+        .{ .start_list = .{ .style = .lower_roman_period } },
+        .{ .start_list_item = "i." },
         .{ .text = 
         \\one (style change)
         \\
@@ -591,8 +645,8 @@ test "4 lists" {
         .close_list_item,
         .close_list,
 
-        .{ .start_list = .{ .tight = true, .style = .plus } },
-        .{ .start_list_item = "+ " },
+        .{ .start_list = .{ .style = .plus } },
+        .{ .start_list_item = "+" },
         .{ .text = 
         \\bullet
         \\
@@ -600,8 +654,8 @@ test "4 lists" {
         .close_list_item,
         .close_list,
 
-        .{ .start_list = .{ .tight = true, .style = .asterisk } },
-        .{ .start_list_item = "* " },
+        .{ .start_list = .{ .style = .asterisk } },
+        .{ .start_list_item = "*" },
         .{ .text = 
         \\bullet (style change)
         },
@@ -615,16 +669,16 @@ test "list: alpha/roman ambiguous" {
         \\i. item
         \\j. next item
     , &.{
-        .{ .start_list = .{ .tight = true, .style = .lower_alpha_period } },
+        .{ .start_list = .{ .style = .lower_alpha_period } },
 
-        .{ .start_list_item = "i. " },
+        .{ .start_list_item = "i." },
         .{ .text = 
         \\item
         \\
         },
         .close_list_item,
 
-        .{ .start_list_item = "j. " },
+        .{ .start_list_item = "j." },
         .{ .text = "next item" },
         .close_list_item,
 
@@ -637,16 +691,16 @@ test "list: start number" {
         \\5) five
         \\8) six
     , &.{
-        .{ .start_list = .{ .tight = true, .style = .decimal_paren } },
+        .{ .start_list = .{ .style = .decimal_paren } },
 
-        .{ .start_list_item = "5) " },
+        .{ .start_list_item = "5)" },
         .{ .text = 
         \\five
         \\
         },
         .close_list_item,
 
-        .{ .start_list_item = "8) " },
+        .{ .start_list_item = "8)" },
         .{ .text = 
         \\six
         },
@@ -662,16 +716,16 @@ test "loose list" {
         \\
         \\- two
     , &.{
-        .{ .start_list = .{ .tight = false, .style = .hyphen } },
+        .{ .start_list = .{ .style = .hyphen } },
 
-        .{ .start_list_item = "- " },
+        .{ .start_list_item = "-" },
         .{ .text = 
         \\one
         \\
         },
         .close_list_item,
 
-        .{ .start_list_item = "- " },
+        .{ .start_list_item = "-" },
         .{ .text = "two" },
         .close_list_item,
 
@@ -690,7 +744,7 @@ const TestEvent = union(Event.Kind) {
     start_quote,
     close_quote,
 
-    start_list: struct { tight: bool, style: Marker.Style },
+    start_list: struct { style: Marker.Style },
     close_list,
 
     start_list_item: []const u8,
@@ -712,8 +766,7 @@ const TestEvent = union(Event.Kind) {
             => |text| try writer.print(" \"{}\"", .{std.zig.fmtEscapes(text)}),
 
             .start_list => |list| {
-                try writer.print(" {s} {s}", .{
-                    if (list.tight) "tight" else "loose",
+                try writer.print(" {s}", .{
                     std.meta.tagName(list.style),
                 });
             },
