@@ -28,6 +28,7 @@ pub fn build(b: *std.build.Builder) void {
     const exe_tests = b.addTest("src/main.zig");
     exe_tests.setTarget(target);
     exe_tests.setBuildMode(mode);
+    exe_tests.setFilter(b.option([]const u8, "test-filter", "Set the test filter"));
 
     const test_step = b.step("test", "Run unit tests");
     test_step.dependOn(&exe_tests.step);
