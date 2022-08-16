@@ -44,30 +44,10 @@ fn buildConvertDjotHtmlTests(b: *std.build.Builder, target: std.zig.CrossTarget,
 
     const run_cmd = exe.run();
 
-    run_cmd.addFileSourceArg(.{ .path = "djot/test/attributes.test" });
-    run_cmd.addFileSourceArg(.{ .path = "djot/test/blockquote.test" });
-    run_cmd.addFileSourceArg(.{ .path = "djot/test/code_blocks.test" });
-    run_cmd.addFileSourceArg(.{ .path = "djot/test/definition-lists.test" });
-    run_cmd.addFileSourceArg(.{ .path = "djot/test/emoji.test" });
-    run_cmd.addFileSourceArg(.{ .path = "djot/test/emphasis.test" });
-    run_cmd.addFileSourceArg(.{ .path = "djot/test/escapes.test" });
-    run_cmd.addFileSourceArg(.{ .path = "djot/test/fenced_divs.test" });
-    run_cmd.addFileSourceArg(.{ .path = "djot/test/footnotes.test" });
-    run_cmd.addFileSourceArg(.{ .path = "djot/test/headings.test" });
-    run_cmd.addFileSourceArg(.{ .path = "djot/test/insert-delete-mark.test" });
-    run_cmd.addFileSourceArg(.{ .path = "djot/test/links_and_images.test" });
-    run_cmd.addFileSourceArg(.{ .path = "djot/test/lists.test" });
-    run_cmd.addFileSourceArg(.{ .path = "djot/test/math.test" });
-    run_cmd.addFileSourceArg(.{ .path = "djot/test/para.test" });
-    run_cmd.addFileSourceArg(.{ .path = "djot/test/raw.test" });
-    run_cmd.addFileSourceArg(.{ .path = "djot/test/smart.test" });
-    run_cmd.addFileSourceArg(.{ .path = "djot/test/spans.test" });
-    run_cmd.addFileSourceArg(.{ .path = "djot/test/super-subscript.test" });
-    run_cmd.addFileSourceArg(.{ .path = "djot/test/tables.test" });
-    run_cmd.addFileSourceArg(.{ .path = "djot/test/task_lists.test" });
-    run_cmd.addFileSourceArg(.{ .path = "djot/test/thematic_breaks.test" });
-    run_cmd.addFileSourceArg(.{ .path = "djot/test/verbatim.test" });
+    if (b.option([]const u8, "test-directory", "Path to the djot test cases directory")) |test_directory_path| {
+        run_cmd.addFileSourceArg(.{ .path = test_directory_path });
+    }
 
-    const run_step = b.step("convert-djot-html-tests", "Run the tests from github:jgm/djot");
+    const run_step = b.step("convert-djot-html-tests", "Convert test cases from github:jgm/djot into zig tests");
     run_step.dependOn(&run_cmd.step);
 }

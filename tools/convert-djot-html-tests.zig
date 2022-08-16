@@ -1,5 +1,4 @@
 const std = @import("std");
-const djot = @import("djot");
 
 pub fn main() !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
@@ -10,82 +9,98 @@ pub fn main() !void {
     const args = try std.process.argsAlloc(arena.allocator());
     defer std.process.argsFree(arena.allocator(), args);
 
+    if (args.len < 2) {
+        return error.NoTestCaseDirectorySpecified;
+    }
+
     const cwd = std.fs.cwd();
-    const test_files = args[1..];
-    const test_sources = try arena.allocator().alloc([]const u8, test_files.len);
-    for (test_files) |test_filepath, i| {
-        test_sources[i] = try cwd.readFileAlloc(arena.allocator(), test_filepath, 50 * 1024);
-    }
 
-    var tests = std.StringArrayHashMap([]Test).init(arena.allocator());
-    for (test_sources) |source, i| {
-        const old_value = try tests.fetchPut(test_files[i], try extractTests(arena.allocator(), source));
-        if (old_value != null) {
-            std.debug.print("test file \"{}\" specified multiple times!\n", .{std.zig.fmtEscapes(test_files[0])});
+    var test_dir = try cwd.openIterableDir(args[1], .{});
+    defer test_dir.close();
+
+    var out_dir = try cwd.makeOpenPath("src/test", .{});
+    defer out_dir.close();
+
+    var test_index_zig_source = std.ArrayList(u8).init(gpa.allocator());
+    defer test_index_zig_source.deinit();
+
+    try test_index_zig_source.writer().writeAll(
+        \\const std = @import("std");
+        \\const djot = @import("./djot.zig");
+        \\
+        \\pub fn testDjotToHtml(djot_source: [:0]const u8, expected_html: []const u8) !void {
+        \\    errdefer std.debug.print("\n```djot\n{s}\n```\n\n", .{djot_source});
+        \\    const html = try djot.toHtml(std.testing.allocator, djot_source);
+        \\    defer std.testing.allocator.free(html);
+        \\    try std.testing.expectEqualStrings(expected_html, html);
+        \\}
+        \\
+        \\comptime {
+        \\
+    );
+
+    var num_tests_converted: usize = 0;
+    var walker = try test_dir.walk(arena.allocator());
+    while (try walker.next()) |walk_entry| {
+        if (walk_entry.kind != .File) {
+            continue;
         }
-    }
 
-    const PassFail = struct {
-        pass: usize,
-        fail: usize,
-    };
-
-    // Number of tests passed or failed for each file
-    var tests_pass_fail = std.StringArrayHashMap(PassFail).init(arena.allocator());
-
-    var test_cases_file_iter = tests.iterator();
-    while (test_cases_file_iter.next()) |file_entry| {
-        var num = PassFail{
-            .pass = 0,
-            .fail = 0,
-        };
-        for (file_entry.value_ptr.*) |test_case, i| {
-            var test_allocator = std.heap.GeneralPurposeAllocator(.{}){
-                .backing_allocator = gpa.allocator(),
-            };
-            std.debug.print("\r\x1b[0K" ++ "running test {} from '{s}'", .{ i, file_entry.key_ptr.* });
-            if (testDjotToHtml(test_allocator.allocator(), test_case)) {
-                num.pass += 1;
-            } else |err| {
-                num.fail += 1;
-                std.debug.print("\r\x1b[0K" ++ "test {} from '{s}' failed: {}\n```\n{s}\n```\n\n", .{ i, file_entry.key_ptr.*, err, test_case.djot });
-            }
-            if (test_allocator.deinit()) {
-                std.debug.print("test {} leaked memory:\n```\n{s}\n```\n\n", .{ i, test_case.djot });
-            }
+        const test_filepath = walk_entry.path;
+        const test_extension = std.fs.path.extension(test_filepath);
+        if (!std.mem.eql(u8, test_extension, ".test")) {
+            std.debug.print("\"{}\" has wrong extension, skipping\n", .{std.zig.fmtEscapes(test_filepath)});
+            continue;
         }
-        try tests_pass_fail.putNoClobber(file_entry.key_ptr.*, num);
+        const output_filepath = try std.fmt.allocPrint(arena.allocator(), "{s}.zig", .{test_filepath[0 .. test_filepath.len - 5]});
+
+        const test_source = try walk_entry.dir.readFileAlloc(arena.allocator(), walk_entry.basename, 50 * 1024);
+        const tests = try extractTests(arena.allocator(), test_source);
+
+        var zig_source = std.ArrayList(u8).init(gpa.allocator());
+        defer zig_source.deinit();
+
+        const writer = zig_source.writer();
+
+        try writer.writeAll(
+            \\const testDjotToHtml = @import("../html_tests.zig").testDjotToHtml;
+            \\
+            \\
+        );
+
+        for (tests) |test_case, i| {
+            var djot_lines = std.mem.split(u8, test_case.djot, "\n");
+            var html_lines = std.mem.split(u8, test_case.html, "\n");
+
+            try writer.print("test \"html.{} {}\" {{\n", .{ std.zig.fmtEscapes(walk_entry.basename[0 .. walk_entry.basename.len - 5]), i });
+            try writer.writeAll("    try testDjotToHtml(\n");
+            while (djot_lines.next()) |line| {
+                try writer.print("        \\\\{s}\n", .{line});
+            }
+            try writer.writeAll("    ,\n");
+            while (html_lines.next()) |line| {
+                try writer.print("        \\\\{s}\n", .{line});
+            }
+            try writer.writeAll("    );\n");
+            try writer.writeAll("}\n\n");
+
+            num_tests_converted += 1;
+        }
+
+        try out_dir.writeFile(output_filepath, zig_source.items);
+
+        try test_index_zig_source.writer().print("_ = @import(\"test/{}\");\n", .{std.zig.fmtEscapes(output_filepath)});
     }
-    std.debug.print("\r\x1b[0K", .{});
 
-    var total = PassFail{
-        .pass = 0,
-        .fail = 0,
-    };
+    try test_index_zig_source.writer().writeAll(
+        \\}
+        \\
+        \\
+    );
 
-    var pass_fail_iter = tests_pass_fail.iterator();
-    while (pass_fail_iter.next()) |file_entry| {
-        total.pass += file_entry.value_ptr.pass;
-        total.fail += file_entry.value_ptr.fail;
-        std.debug.print("[{: >2}/{: >2}/{: >2}] {s}\n", .{
-            file_entry.value_ptr.pass,
-            file_entry.value_ptr.fail,
-            file_entry.value_ptr.pass + file_entry.value_ptr.fail,
-            file_entry.key_ptr.*,
-        });
-    }
+    try cwd.writeFile("src/html_tests.zig", test_index_zig_source.items);
 
-    std.debug.print(
-        \\Ran {} tests.
-        \\{} tests passed.
-        \\{} tests failed.
-    , .{ total.pass + total.fail, total.pass, total.fail });
-}
-
-pub fn testDjotToHtml(allocator: std.mem.Allocator, test_case: Test) !void {
-    const html = try djot.toHtml(allocator, test_case.djot);
-    defer allocator.free(html);
-    try std.testing.expectEqualStrings(test_case.html, html);
+    std.debug.print("Converted {} tests.\n", .{num_tests_converted});
 }
 
 const Test = struct {

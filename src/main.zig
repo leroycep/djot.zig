@@ -8,4 +8,5 @@ pub fn main() anyerror!void {
 
 comptime {
     _ = @import("djot.zig");
+    _ = @import("html_tests.zig");
 }

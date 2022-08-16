@@ -792,9 +792,8 @@ const TestEvent = union(Event.Kind) {
 };
 
 fn testParse(source: [*:0]const u8, expected: []const TestEvent) !void {
-    errdefer {
-        std.debug.print("\n```djot\n{s}\n```\n\n", .{source});
-    }
+    errdefer std.debug.print("\n```djot\n{s}\n```\n\n", .{source});
+
     var parsed = try parse(std.testing.allocator, source);
     defer parsed.deinit(std.testing.allocator);
 
