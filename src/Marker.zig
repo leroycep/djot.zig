@@ -125,13 +125,12 @@ fn parseBulletMarker(source: []const u8, parent_index: *usize) ?Marker {
     const start = parent_index.*;
     var index = start;
 
-    const style = switch (source[index]) {
+    const style = switch (parselib.next(u8, source, &index) orelse return null) {
         '*' => Style.asterisk,
         '-' => Style.hyphen,
         '+' => Style.plus,
         else => return null,
     };
-    index += 1;
 
     if (incrementIfCheckBox(source, &index)) |_| {
         parent_index.* = index;
@@ -213,6 +212,8 @@ const MarkerText = struct {
 };
 
 fn parseOrderedMarkerText(source: []const u8, parent_index: *usize) ?MarkerText {
+    if (parent_index.* >= source.len) return null;
+
     var res = MarkerText{
         .start = parent_index.*,
         .end = parent_index.*,

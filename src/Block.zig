@@ -80,6 +80,7 @@ pub fn parseBlocks(allocator: std.mem.Allocator, parent: *Cursor, prefix: ?*cons
         was_break = parseNewlinePrefix(&cursor, prefix) orelse break;
 
         if (cursor.source_index.index == prev_index.index) {
+            std.debug.print("token({}) = {s} \"{}\"\n", .{ token.start.index, std.meta.tagName(token.kind), std.zig.fmtEscapes(cursor.source[token.start.index..token.end.index]) });
             return error.WouldLoop;
         }
         prev_index = cursor.source_index;
@@ -227,12 +228,15 @@ pub fn parseList(allocator: std.mem.Allocator, parent: *Cursor, prefix: ?*const 
 fn parseListItem(allocator: std.mem.Allocator, parent: *Cursor, prefix: ?*const Prefix) Error!?EventIndex {
     var cursor = parent.copy();
 
-    const marker = parseExpectToken(&cursor, .marker) orelse return null;
+    var marker_index: usize = cursor.source_index.index;
+    const marker = Marker.parse(cursor.source, &marker_index) orelse return null;
+    cursor.source_index.index = @intCast(u32, marker_index);
+
     _ = parseExpectToken(&cursor, .space) orelse return null;
 
     const event_index = try cursor.append(allocator, .{
         .kind = .start_list_item,
-        .source = .{ .slice = cursor.slice(marker.start, marker.end) },
+        .source = .{ .slice = cursor.source[marker.start..marker.end] },
     });
 
     if (!try parseBlocks(allocator, &cursor, &.{ .prev = prefix, .token = .space })) {
