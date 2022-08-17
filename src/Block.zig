@@ -1,102 +1,13 @@
 const std = @import("std");
 const builtin = @import("builtin");
 const Marker = @import("./Marker.zig");
+const djot = @import("./djot.zig");
+const parselib = @import("./parse.zig");
 
-const Document = std.MultiArrayList(Event);
-
-const Event = struct {
-    kind: Kind,
-    source: SourceIndex,
-    extra: Extra = Extra{ .none = {} },
-
-    const Kind = enum {
-        text,
-        text_break,
-
-        start_heading,
-        close_heading,
-
-        start_quote,
-        close_quote,
-
-        start_list,
-        close_list,
-
-        start_list_item,
-        close_list_item,
-    };
-
-    const Extra = union {
-        none: void,
-        start_list: List,
-
-        const List = struct {
-            style: Marker.Style,
-        };
-    };
-
-    pub fn format(
-        this: @This(),
-        comptime fmt: []const u8,
-        options: std.fmt.FormatOptions,
-        writer: anytype,
-    ) !void {
-        _ = fmt;
-        _ = options;
-        try writer.print("{s}", .{std.meta.tagName(this.kind)});
-        switch (this.kind) {
-            .text,
-            .start_heading,
-            .start_list_item,
-            => try writer.print(" \"{}\"", .{std.zig.fmtEscapes(this.source.slice)}),
-
-            .start_list => try writer.print(" {s}", .{
-                std.meta.tagName(this.extra.start_list.style),
-            }),
-
-            // Events that are only tags just print the tag name
-            .text_break,
-            .close_heading,
-            .start_quote,
-            .close_quote,
-            .close_list,
-            .close_list_item,
-            => {},
-        }
-    }
-};
-
-// TODO: Make this just a wrapper over a u32
-const SourceIndex = struct {
-    slice: []const u8,
-};
-
-const Error = std.mem.Allocator.Error || error{
-    // TODO: Remove this
-    WouldLoop,
-};
-
-const EventIndex = struct {
-    index: u32,
-};
-
-pub fn parse(allocator: std.mem.Allocator, source: [*:0]const u8) Error!Document.Slice {
-    var document = std.MultiArrayList(Event){};
-    defer document.deinit(allocator);
-
-    var cursor = Cursor{
-        .source = source,
-        .out_buffer = &document,
-        .index = 0,
-        .out_len = 0,
-    };
-
-    _ = try parseBlocks(allocator, &cursor, null);
-
-    document.len = cursor.out_len;
-
-    return document.toOwnedSlice();
-}
+const Cursor = djot.Cursor;
+const EventIndex = Cursor.EventIndex;
+const Event = djot.Event;
+const Error = djot.Error;
 
 const Prefix = struct {
     prev: ?*const Prefix = null,
@@ -126,14 +37,13 @@ const Prefix = struct {
         if (this.prev) |prev| {
             prev.dump();
         }
-        std.debug.print("{s}|", .{std.meta.tagName(this.token)});
     }
 };
 
 pub fn parseBlocks(allocator: std.mem.Allocator, parent: *Cursor, prefix: ?*const Prefix) Error!bool {
     var cursor = parent.copy();
 
-    var prev_index = cursor.index;
+    var prev_index = cursor.source_index;
     var was_break = false;
 
     while (true) {
@@ -169,16 +79,13 @@ pub fn parseBlocks(allocator: std.mem.Allocator, parent: *Cursor, prefix: ?*cons
 
         was_break = parseNewlinePrefix(&cursor, prefix) orelse break;
 
-        if (cursor.index == prev_index) {
-            const source = std.mem.span(cursor.source);
-            std.debug.print("source = \"{}\"\n", .{std.zig.fmtEscapes(source[cursor.index..])});
-            std.debug.print("events = {any}\n", .{cursor.out_buffer.items(.kind)});
+        if (cursor.source_index.index == prev_index.index) {
             return error.WouldLoop;
         }
-        prev_index = cursor.index;
+        prev_index = cursor.source_index;
     }
 
-    const was_content = cursor.out_len > parent.out_len;
+    const was_content = cursor.events_index.index > parent.events_index.index;
 
     parent.commit(cursor);
     return was_content;
@@ -214,9 +121,15 @@ pub fn parseHeading(allocator: std.mem.Allocator, parent: *Cursor) Error!?void {
     const token = parseExpectToken(&cursor, .heading) orelse return null;
     _ = parseExpectToken(&cursor, .space);
 
-    _ = try cursor.append(allocator, .{ .kind = .start_heading, .source = .{ .slice = cursor.source[token.start..token.end] } });
+    _ = try cursor.append(allocator, .{
+        .kind = .start_heading,
+        .source = .{ .slice = cursor.slice(token.start, token.end) },
+    });
     _ = try parseText(allocator, &cursor);
-    _ = try cursor.append(allocator, .{ .kind = .close_heading, .source = .{ .slice = cursor.source[0..0] } });
+    _ = try cursor.append(allocator, .{
+        .kind = .close_heading,
+        .source = .{ .slice = cursor.slice(cursor.source_index, cursor.source_index) },
+    });
     _ = parseExpectToken(&cursor, .newline);
 
     parent.commit(cursor);
@@ -227,9 +140,15 @@ pub fn parseQuote(allocator: std.mem.Allocator, parent: *Cursor, prefix: ?*const
     const quote_token = parseExpectToken(&cursor, .quote) orelse return null;
     _ = parseExpectToken(&cursor, .space) orelse return null;
 
-    _ = try cursor.append(allocator, .{ .kind = .start_quote, .source = .{ .slice = cursor.source[quote_token.start..quote_token.end] } });
+    _ = try cursor.append(allocator, .{
+        .kind = .start_quote,
+        .source = .{ .slice = cursor.slice(quote_token.start, quote_token.end) },
+    });
     _ = try parseBlocks(allocator, &cursor, &.{ .prev = &.{ .prev = prefix, .token = .quote }, .token = .space });
-    _ = try cursor.append(allocator, .{ .kind = .close_quote, .source = .{ .slice = cursor.source[cursor.index..cursor.index] } });
+    _ = try cursor.append(allocator, .{
+        .kind = .close_quote,
+        .source = .{ .slice = cursor.slice(cursor.source_index, cursor.source_index) },
+    });
 
     parent.commit(cursor);
 }
@@ -241,13 +160,14 @@ pub fn parseList(allocator: std.mem.Allocator, parent: *Cursor, prefix: ?*const 
     // whether it's a tight or loose list
     const start_event = try cursor.append(allocator, .{
         .kind = .start_list,
-        .source = .{ .slice = cursor.source[cursor.index..cursor.index] },
+        .source = .{ .slice = cursor.slice(cursor.source_index, cursor.source_index) },
         .extra = Event.Extra{ .start_list = .{ .style = undefined } },
     });
 
     const first_list_item = (try parseListItem(allocator, &cursor, prefix)) orelse return null;
 
-    const list_marker = Marker.parse(cursor.source, @intCast(u32, @ptrToInt(cursor.out_buffer.items(.source)[first_list_item.index].slice.ptr) - @ptrToInt(cursor.source))).?;
+    var marker_index: usize = 0;
+    const list_marker = Marker.parse(cursor.events.items(.source)[first_list_item.index].slice, &marker_index).?;
 
     var list_style = list_marker.style;
     var next_item_would_make_loose = false;
@@ -266,7 +186,8 @@ pub fn parseList(allocator: std.mem.Allocator, parent: *Cursor, prefix: ?*const 
 
         const list_item = try parseListItem(allocator, &loop_cursor, prefix) orelse break;
 
-        const item_marker = Marker.parse(loop_cursor.source, @intCast(u32, @ptrToInt(loop_cursor.out_buffer.items(.source)[list_item.index].slice.ptr) - @ptrToInt(loop_cursor.source))).?;
+        marker_index = 0;
+        const item_marker = Marker.parse(loop_cursor.events.items(.source)[list_item.index].slice, &marker_index).?;
         const style = item_marker.style;
 
         if (style != list_style and list_style.isRoman() and style.isAlpha()) {
@@ -290,37 +211,43 @@ pub fn parseList(allocator: std.mem.Allocator, parent: *Cursor, prefix: ?*const 
         }
     }
 
-    cursor.out_buffer.items(.extra)[start_event.index] = Event.Extra{
+    cursor.events.items(.extra)[start_event.index] = Event.Extra{
         .start_list = .{
             .style = list_style,
         },
     };
-    _ = try cursor.append(allocator, .{ .kind = .close_list, .source = .{ .slice = cursor.source[cursor.index..cursor.index] } });
+    _ = try cursor.append(allocator, .{
+        .kind = .close_list,
+        .source = .{ .slice = cursor.slice(cursor.source_index, cursor.source_index) },
+    });
     parent.commit(cursor);
     return;
 }
 
-fn parseListItem(allocator: std.mem.Allocator, parent_cursor: *Cursor, prefix: ?*const Prefix) Error!?EventIndex {
-    var cursor = parent_cursor.copy();
+fn parseListItem(allocator: std.mem.Allocator, parent: *Cursor, prefix: ?*const Prefix) Error!?EventIndex {
+    var cursor = parent.copy();
 
     const marker = parseExpectToken(&cursor, .marker) orelse return null;
     _ = parseExpectToken(&cursor, .space) orelse return null;
 
-    const event_index = try cursor.append(allocator, .{ .kind = .start_list_item, .source = .{ .slice = cursor.source[marker.start..marker.end] } });
+    const event_index = try cursor.append(allocator, .{
+        .kind = .start_list_item,
+        .source = .{ .slice = cursor.slice(marker.start, marker.end) },
+    });
 
     if (!try parseBlocks(allocator, &cursor, &.{ .prev = prefix, .token = .space })) {
         return null;
     }
 
     _ = try cursor.append(allocator, .{ .kind = .close_list_item, .source = .{ .slice = cursor.source[0..0] } });
-    parent_cursor.commit(cursor);
+    parent.commit(cursor);
     return event_index;
 }
 
 pub fn parseText(allocator: std.mem.Allocator, parent: *Cursor) !?void {
     var blank = true;
 
-    const start_index = parent.index;
+    const start_index = parent.source_index;
     var end_index = start_index;
 
     var cursor = parent.copy();
@@ -352,7 +279,10 @@ pub fn parseText(allocator: std.mem.Allocator, parent: *Cursor) !?void {
 
     if (blank) return null;
 
-    _ = try parent.append(allocator, .{ .kind = .text, .source = .{ .slice = parent.source[start_index..end_index] } });
+    _ = try parent.append(allocator, .{
+        .kind = .text,
+        .source = .{ .slice = parent.slice(start_index, end_index) },
+    });
 
     return;
 }
@@ -369,8 +299,8 @@ fn parseExpectToken(parent: *Cursor, expected_token_kind: Token.Kind) ?Token {
 
 pub const Token = struct {
     kind: Kind,
-    start: u32,
-    end: u32,
+    start: Cursor.SourceIndex,
+    end: Cursor.SourceIndex,
 
     pub const Kind = enum {
         newline,
@@ -383,18 +313,19 @@ pub const Token = struct {
 };
 
 pub fn parseToken(parent: *Cursor) ?Token {
-    if (parent.source[parent.index] == 0) return null;
-    if (Marker.parse(parent.source, parent.index)) |marker| blk: {
-        const start = parent.index;
+    if (parent.source_index.index >= parent.source.len) return null;
+
+    var marker_index: usize = parent.source_index.index;
+    if (Marker.parse(parent.source, &marker_index)) |marker| blk: {
+        const start = parent.source_index;
         // Only allow alpha numeric characters with a single character
-        if (marker.style.isAlpha() and marker.end - start > 2) {
+        if (marker.style.isAlpha() and marker.end - start.index > 2) {
             break :blk;
         }
-        parent.index = marker.end;
         return Token{
-            .start = start,
             .kind = .marker,
-            .end = marker.end,
+            .start = .{ .index = @intCast(u32, marker.start) },
+            .end = .{ .index = @intCast(u32, marker.end) },
         };
     }
 
@@ -407,417 +338,59 @@ pub fn parseToken(parent: *Cursor) ?Token {
 
     var res = Token{
         .kind = .text,
-        .start = parent.index,
-        .end = parent.index,
+        .start = parent.source_index,
+        .end = parent.source_index,
     };
 
-    var index = parent.index;
+    var index: usize = parent.source_index.index;
     var state = State.default;
-    while (parent.source[index] != 0) : (index += 1) {
+    while (parselib.next(u8, parent.source, &index)) |c| {
         switch (state) {
-            .default => switch (parent.source[index]) {
+            .default => switch (c) {
                 '#' => {
                     res.kind = .heading;
-                    res.end = index + 1;
+                    res.end.index = @intCast(u32, index);
                     state = .heading;
                 },
                 ' ' => {
                     res.kind = .space;
-                    res.end = index + 1;
+                    res.end.index = @intCast(u32, index);
                     break;
                 },
                 '\n' => {
                     res.kind = .newline;
-                    res.end = index + 1;
+                    res.end.index = @intCast(u32, index);
                     break;
                 },
                 '>' => {
                     res.kind = .quote;
-                    res.end = index + 1;
+                    res.end.index = @intCast(u32, index);
                     break;
                 },
                 else => {
                     res.kind = .text;
+                    res.end.index = @intCast(u32, index);
                     state = .text;
                 },
             },
-            .heading => switch (parent.source[index]) {
-                '#' => res.end = index + 1,
+            .heading => switch (c) {
+                '#' => res.end.index = @intCast(u32, index),
                 else => break,
             },
-            .text => switch (parent.source[index]) {
+            .text => switch (c) {
                 '\n' => break,
-                else => res.end = index + 1,
+                else => res.end.index = @intCast(u32, index),
             },
-            .spaces => switch (parent.source[index]) {
+            .spaces => switch (c) {
                 ' ' => {
-                    res.end = index + 1;
+                    res.end.index = @intCast(u32, index);
                 },
                 else => break,
             },
         }
     }
 
-    parent.index = res.end;
+    parent.source_index = res.end;
 
     return res;
-}
-
-const Cursor = struct {
-    source: [*:0]const u8,
-    out_buffer: *Document,
-    index: u32,
-    out_len: u32,
-
-    pub fn copy(this: @This()) @This() {
-        return @This(){
-            .source = this.source,
-            .out_buffer = this.out_buffer,
-            .index = this.index,
-            .out_len = this.out_len,
-        };
-    }
-
-    pub fn append(this: *@This(), allocator: std.mem.Allocator, event: Event) !EventIndex {
-        const index = EventIndex{ .index = this.out_len };
-        try this.out_buffer.resize(allocator, this.out_len + 1);
-        this.out_len += 1;
-        this.out_buffer.set(index.index, event);
-        return index;
-    }
-
-    // Updates another Parser
-    pub fn commit(this: *@This(), other: @This()) void {
-        this.index = other.index;
-        this.out_len = other.out_len;
-    }
-};
-
-test "heading" {
-    try testParse(
-        \\## A level _two_ heading
-        \\
-    , &.{
-        .{ .start_heading = "##" },
-        .{ .text = 
-        \\A level _two_ heading
-        \\
-        },
-        .close_heading,
-    });
-}
-
-test "heading that takes up three lines" {
-    try testParse(
-        \\## A heading that
-        \\takes up
-        \\three lines
-        \\
-        \\A paragraph, finally.
-    , &.{
-        .{ .start_heading = "##" },
-        .{ .text = 
-        \\A heading that
-        \\takes up
-        \\three lines
-        \\
-        },
-        .close_heading,
-        .{ .text = 
-        \\A paragraph, finally.
-        },
-    });
-}
-
-test "quote with a list in it" {
-    try testParse(
-        \\> This is a block quote.
-        \\>
-        \\> 1. with a
-        \\> 2. list in it
-    , &.{
-        .start_quote,
-        .{ .text = 
-        \\This is a block quote.
-        \\
-        },
-
-        .{ .start_list = .{ .style = .decimal_period } },
-        .{ .start_list_item = "1." },
-        .{ .text = 
-        \\with a
-        \\
-        },
-        .close_list_item,
-        .{ .start_list_item = "2." },
-        .{ .text = 
-        \\list in it
-        },
-        .close_list_item,
-        .close_list,
-
-        .close_quote,
-    });
-}
-
-test "quote 2" {
-    try testParse(
-        \\> This is a block
-        \\quote.
-    , &.{
-        .start_quote,
-        .{ .text = 
-        \\This is a block
-        \\quote.
-        },
-        .close_quote,
-    });
-}
-
-test "list item containing a block quote" {
-    try testParse(
-        \\1.  This is a
-        \\ list item.
-        \\
-        \\ > containing a block quote
-    , &.{
-        .{ .start_list = .{ .style = .decimal_period } },
-
-        .{ .start_list_item = "1." },
-        .{ .text = 
-        \\ This is a
-        \\ list item.
-        \\
-        },
-
-        .start_quote,
-        .{ .text = 
-        \\containing a block quote
-        },
-        .close_quote,
-        .close_list_item,
-
-        .close_list,
-    });
-}
-
-test "list item with second paragraph" {
-    try testParse(
-        \\1.  This is a
-        \\list item.
-        \\
-        \\  Second paragraph under the
-        \\list item.
-    , &.{
-        .{ .start_list = .{ .style = .decimal_period } },
-
-        .{ .start_list_item = "1." },
-        .{ .text = 
-        \\ This is a
-        \\list item.
-        \\
-        },
-        .text_break,
-        .{ .text = 
-        \\ Second paragraph under the
-        \\list item.
-        },
-        .close_list_item,
-
-        .close_list,
-    });
-}
-
-test "4 lists" {
-    try testParse(
-        \\i) one
-        \\i. one (style change)
-        \\+ bullet
-        \\* bullet (style change)
-    , &.{
-        .{ .start_list = .{ .style = .lower_roman_paren } },
-        .{ .start_list_item = "i)" },
-        .{ .text = 
-        \\one
-        \\
-        },
-        .close_list_item,
-        .close_list,
-
-        .{ .start_list = .{ .style = .lower_roman_period } },
-        .{ .start_list_item = "i." },
-        .{ .text = 
-        \\one (style change)
-        \\
-        },
-        .close_list_item,
-        .close_list,
-
-        .{ .start_list = .{ .style = .plus } },
-        .{ .start_list_item = "+" },
-        .{ .text = 
-        \\bullet
-        \\
-        },
-        .close_list_item,
-        .close_list,
-
-        .{ .start_list = .{ .style = .asterisk } },
-        .{ .start_list_item = "*" },
-        .{ .text = 
-        \\bullet (style change)
-        },
-        .close_list_item,
-        .close_list,
-    });
-}
-
-test "list: alpha/roman ambiguous" {
-    try testParse(
-        \\i. item
-        \\j. next item
-    , &.{
-        .{ .start_list = .{ .style = .lower_alpha_period } },
-
-        .{ .start_list_item = "i." },
-        .{ .text = 
-        \\item
-        \\
-        },
-        .close_list_item,
-
-        .{ .start_list_item = "j." },
-        .{ .text = "next item" },
-        .close_list_item,
-
-        .close_list,
-    });
-}
-
-test "list: start number" {
-    try testParse(
-        \\5) five
-        \\8) six
-    , &.{
-        .{ .start_list = .{ .style = .decimal_paren } },
-
-        .{ .start_list_item = "5)" },
-        .{ .text = 
-        \\five
-        \\
-        },
-        .close_list_item,
-
-        .{ .start_list_item = "8)" },
-        .{ .text = 
-        \\six
-        },
-        .close_list_item,
-
-        .close_list,
-    });
-}
-
-test "loose list" {
-    try testParse(
-        \\- one
-        \\
-        \\- two
-    , &.{
-        .{ .start_list = .{ .style = .hyphen } },
-
-        .{ .start_list_item = "-" },
-        .{ .text = 
-        \\one
-        \\
-        },
-        .close_list_item,
-
-        .{ .start_list_item = "-" },
-        .{ .text = "two" },
-        .close_list_item,
-
-        .close_list,
-    });
-}
-
-const TestEvent = union(Event.Kind) {
-    text: []const u8,
-
-    text_break,
-
-    start_heading: []const u8,
-    close_heading,
-
-    start_quote,
-    close_quote,
-
-    start_list: struct { style: Marker.Style },
-    close_list,
-
-    start_list_item: []const u8,
-    close_list_item,
-
-    pub fn format(
-        this: @This(),
-        comptime fmt: []const u8,
-        options: std.fmt.FormatOptions,
-        writer: anytype,
-    ) !void {
-        _ = fmt;
-        _ = options;
-        try writer.print("{s}", .{std.meta.tagName(this)});
-        switch (this) {
-            .text,
-            .start_list_item,
-            .start_heading,
-            => |text| try writer.print(" \"{}\"", .{std.zig.fmtEscapes(text)}),
-
-            .start_list => |list| {
-                try writer.print(" {s}", .{
-                    std.meta.tagName(list.style),
-                });
-            },
-
-            // Events that are only tags just print the tag name
-            .text_break,
-            .close_heading,
-            .start_quote,
-            .close_quote,
-            .close_list,
-            .close_list_item,
-            => {},
-        }
-    }
-};
-
-fn testParse(source: [*:0]const u8, expected: []const TestEvent) !void {
-    errdefer std.debug.print("\n```djot\n{s}\n```\n\n", .{source});
-
-    var parsed = try parse(std.testing.allocator, source);
-    defer parsed.deinit(std.testing.allocator);
-
-    var expected_text = std.ArrayList(u8).init(std.testing.allocator);
-    defer expected_text.deinit();
-    for (expected) |expected_block| {
-        try expected_text.writer().print("{}\n", .{expected_block});
-    }
-
-    var parsed_text = std.ArrayList(u8).init(std.testing.allocator);
-    defer parsed_text.deinit();
-    var i: usize = 0;
-    while (i < parsed.len) : (i += 1) {
-        try parsed_text.writer().print("{}\n", .{Event{
-            .kind = parsed.items(.kind)[i],
-            .source = parsed.items(.source)[i],
-            .extra = parsed.items(.extra)[i],
-        }});
-    }
-
-    try std.testing.expectEqualStrings(expected_text.items, parsed_text.items);
-}
-
-fn beep(src: std.builtin.SourceLocation, input: anytype) @TypeOf(input) {
-    std.debug.print("{s}:{} {}\n", .{ src.fn_name, src.line, input });
-    return input;
 }
