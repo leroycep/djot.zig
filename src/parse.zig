@@ -64,42 +64,45 @@ pub fn IndexedSlice(T: type) type {
     };
 }
 
-pub fn expect(T: type, source: []const T, index: *usize, expected: T) ?IndexedSlice(T) {
-    const start = index.*;
-    if (next(T, source, index) == expected) {
-        index.* += 1;
+pub fn expect(T: type, source: []const T, parent: *usize, expected: T) ?IndexedSlice(T) {
+    const start = parent.*;
+    var index = start;
+    if (next(T, source, &index) == expected) {
+        parent.* = index;
         return IndexedSlice(T){
             .source = source,
             .start = start,
-            .end = index.*,
+            .end = index,
         };
     }
     return null;
 }
 
-pub fn expectInRange(T: type, source: []const T, index: *usize, low: T, high: T) ?IndexedSlice(T) {
-    const start = index.*;
-    const t = next(T, source, index) orelse return null;
+pub fn expectInRange(T: type, source: []const T, parent: *usize, low: T, high: T) ?IndexedSlice(T) {
+    const start = parent.*;
+    var index = start;
+    const t = next(T, source, &index) orelse return null;
     if (low <= t and t <= high) {
-        index.* += 1;
+        parent.* = index;
         return IndexedSlice(T){
             .source = source,
             .start = start,
-            .end = index.*,
+            .end = index,
         };
     }
     return null;
 }
 
-pub fn expectInList(T: type, source: []const T, index: *usize, list: []const T) ?IndexedSlice(T) {
-    const start = index.*;
-    const t = next(T, source, index) orelse return null;
+pub fn expectInList(T: type, source: []const T, parent: *usize, list: []const T) ?IndexedSlice(T) {
+    const start = parent.*;
+    var index = start;
+    const t = next(T, source, &index) orelse return null;
     if (std.mem.indexOfScalar(u8, list, t)) |_| {
-        index.* += 1;
+        parent.* = index;
         return IndexedSlice(T){
             .source = source,
             .start = start,
-            .end = index.*,
+            .end = index,
         };
     }
     return null;

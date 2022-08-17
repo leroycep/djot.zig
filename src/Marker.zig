@@ -93,6 +93,7 @@ fn parseEnclosedMarker(source: []const u8, parent_index: *usize) ?Marker {
     const text = parseOrderedMarkerText(source, &index) orelse return null;
     _ = parselib.expect(u8, source, &index, ')') orelse return null;
 
+    parent_index.* = index;
     return Marker{
         .start = start,
         .end = index,
@@ -133,6 +134,7 @@ fn parseBulletMarker(source: []const u8, parent_index: *usize) ?Marker {
     index += 1;
 
     if (incrementIfCheckBox(source, &index)) |_| {
+        parent_index.* = index;
         return Marker{
             .start = start,
             .end = index,
@@ -145,6 +147,7 @@ fn parseBulletMarker(source: []const u8, parent_index: *usize) ?Marker {
         };
     }
 
+    parent_index.* = index;
     return Marker{
         .start = start,
         .style = style,
@@ -247,7 +250,7 @@ fn parseOrderedMarkerText(source: []const u8, parent_index: *usize) ?MarkerText 
     return res;
 }
 
-test "parse style" {
+test "marker parse style" {
     try expectParseStyle(": definition", .definition);
     try expectParseStyle("- hyphen", .hyphen);
     try expectParseStyle("+ plus", .plus);
@@ -278,7 +281,7 @@ fn expectParseStyle(source: []const u8, expected: Style) !void {
     try std.testing.expectEqual(expected, marker.style);
 }
 
-test "parse text" {
+test "marker parse text" {
     try expectParseText(": definition", ":");
     try expectParseText("- hyphen", "-");
     try expectParseText("+ plus", "+");

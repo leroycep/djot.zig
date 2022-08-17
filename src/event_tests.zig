@@ -8,7 +8,7 @@ const EventIndex = Cursor.EventIndex;
 const Event = djot.Event;
 const Error = djot.Error;
 
-test "heading" {
+test "events heading" {
     try testParse(
         \\## A level _two_ heading
         \\
@@ -22,7 +22,7 @@ test "heading" {
     });
 }
 
-test "heading that takes up three lines" {
+test "events heading that takes up three lines" {
     try testParse(
         \\## A heading that
         \\takes up
@@ -44,7 +44,7 @@ test "heading that takes up three lines" {
     });
 }
 
-test "quote with a list in it" {
+test "events quote with a list in it" {
     try testParse(
         \\> This is a block quote.
         \\>
@@ -75,7 +75,7 @@ test "quote with a list in it" {
     });
 }
 
-test "quote 2" {
+test "events quote 2" {
     try testParse(
         \\> This is a block
         \\quote.
@@ -89,7 +89,7 @@ test "quote 2" {
     });
 }
 
-test "list item containing a block quote" {
+test "events list item containing a block quote" {
     try testParse(
         \\1.  This is a
         \\ list item.
@@ -116,7 +116,7 @@ test "list item containing a block quote" {
     });
 }
 
-test "list item with second paragraph" {
+test "events list item with second paragraph" {
     try testParse(
         \\1.  This is a
         \\list item.
@@ -143,7 +143,7 @@ test "list item with second paragraph" {
     });
 }
 
-test "4 lists" {
+test "events 4 lists" {
     try testParse(
         \\i) one
         \\i. one (style change)
@@ -187,7 +187,7 @@ test "4 lists" {
     });
 }
 
-test "list: alpha/roman ambiguous" {
+test "events list: alpha/roman ambiguous" {
     try testParse(
         \\i. item
         \\j. next item
@@ -209,7 +209,7 @@ test "list: alpha/roman ambiguous" {
     });
 }
 
-test "list: start number" {
+test "events list: start number" {
     try testParse(
         \\5) five
         \\8) six
@@ -233,7 +233,7 @@ test "list: start number" {
     });
 }
 
-test "loose list" {
+test "events loose list" {
     try testParse(
         \\- one
         \\
