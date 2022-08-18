@@ -255,6 +255,9 @@ const TestEvent = union(djot.Event.Kind) {
     start_list_item: []const u8,
     close_list_item: []const u8,
 
+    start_verbatim,
+    close_verbatim,
+
     pub fn format(
         this: @This(),
         comptime fmt: []const u8,
@@ -283,6 +286,8 @@ const TestEvent = union(djot.Event.Kind) {
             .close_quote,
             .start_paragraph,
             .close_paragraph,
+            .start_verbatim,
+            .close_verbatim,
             => {},
         }
     }

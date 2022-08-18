@@ -265,29 +265,156 @@ fn parseParagraph(parent_events: *djot.EventCursor, parent_tokens: *djot.TokCurs
 
     while (tokens.expect(.space)) |_| {}
 
-    const first_text = tokens.expect(.text) orelse return null;
-    _ = try events.append(.{ .text = parent_tokens.tokens.items(.start)[first_text] });
+    (try parseTextSpan(&events, &tokens, prefix, null)) orelse return null;
+
     _ = tokens.expect(.line_break);
-
-    while (true) {
-        var lookahead = tokens;
-
-        if (prefix) |p| {
-            if (!p.parsePrefix(&lookahead)) break;
-        }
-
-        const text = lookahead.expect(.text) orelse break;
-        _ = try events.append(.{ .text = lookahead.tokens.items(.start)[text] });
-
-        _ = lookahead.expect(.line_break);
-
-        tokens = lookahead;
-    }
 
     _ = try events.append(.close_paragraph);
 
     parent_tokens.* = tokens;
     parent_events.* = events;
+}
+
+fn parseTextSpan(parent_events: *djot.EventCursor, parent_tokens: *djot.TokCursor, prefix: ?*const Prefix, opener: ?PrevOpener) djot.Error!?void {
+    var events = parent_events.*;
+    var tokens = parent_tokens.*;
+
+    std.debug.print("{s}:{}\n", .{ @src().fn_name, @src().line });
+    if (try parseTextSpanVerbatim(&events, &tokens, prefix, if (opener) |o| &o else null)) |_| {
+        parent_tokens.* = tokens;
+        parent_events.* = events;
+        return;
+    }
+
+    const first_text = parseTextPlain(&tokens) orelse return null;
+    _ = try events.append(.{ .text = first_text.source_index });
+
+    var lookahead = tokens;
+    while (lookahead.next()) |token| : (tokens = lookahead) {
+        switch (token.kind) {
+            .eof => if (opener) |o| {
+                if (o.tok.kind == .ticks) break;
+                return null;
+            } else {
+                break;
+            },
+
+            .line_break => {
+                if (lookahead.expectInList(&.{ .line_break, .eof })) |_| {
+                    break;
+                }
+                if (prefix) |p| {
+                    if (!p.parsePrefix(&lookahead)) {
+                        break;
+                    }
+                }
+                _ = try events.append(.{ .text = token.start });
+            },
+
+            .text,
+            .space,
+            .right_angle,
+            .heading,
+            .nonbreaking_space,
+            => {
+                // Treat as text
+                _ = try events.append(.{ .text = token.start });
+            },
+
+            .escape => {
+                // TODO: Append as an escape event
+            },
+            .hard_line_break => {
+                // TODO: Append hard_line_break event
+            },
+
+            .asterisk => {
+                // TODO: parse strong span
+            },
+
+            .ticks => {
+                std.debug.print("{s}:{}", .{ @src().fn_name, @src().line });
+                if (opener) |o| blk: {
+                    if (o.tok.kind != .ticks) break :blk;
+                    const opener_ticks = Token.parse(tokens.source, o.tok.start);
+                    const these_ticks = Token.parse(tokens.source, o.tok.start);
+                    if (opener_ticks.end - opener_ticks.start == these_ticks.end - these_ticks.start) {
+                        // Exit loop, return value
+                        break;
+                    }
+                }
+
+                // TODO: parse verbatim span
+                {
+                    // start a new verbatim span
+                    var verbatim_events = events;
+                    _ = try verbatim_events.append(.start_verbatim);
+                    if (try parseTextSpan(&verbatim_events, &lookahead, prefix, .{ .prev = if (opener) |o| &o else null, .tok = token })) |_| {
+                        std.debug.print("{s}:{}", .{ @src().fn_name, @src().line });
+                        _ = try verbatim_events.append(.close_verbatim);
+                        events = verbatim_events;
+                    }
+                }
+            },
+
+            .marker => break,
+        }
+
+        if (prefix) |p| {
+            if (!p.parsePrefix(&lookahead)) break;
+        }
+    }
+
+    parent_tokens.* = tokens;
+    parent_events.* = events;
+}
+
+fn parseTextSpanVerbatim(parent_events: *djot.EventCursor, parent_tokens: *djot.TokCursor, prefix: ?*const Prefix, prev_opener: ?*const PrevOpener) djot.Error!?void {
+    var events = parent_events.*;
+    var tokens = parent_tokens.*;
+    std.debug.print("{s}:{}\n", .{ @src().fn_name, @src().line });
+
+    const ticks_open = tokens.expect(.ticks) orelse return null;
+    _ = try events.append(.start_verbatim);
+
+    _ = (try parseTextSpan(&events, &tokens, prefix, .{ .prev = prev_opener, .tok = tokens.tokOf(ticks_open) })) orelse return null;
+
+    std.debug.print("{s}:{}\n", .{ @src().fn_name, @src().line });
+    _ = try events.append(.close_verbatim);
+
+    parent_tokens.* = tokens;
+    parent_events.* = events;
+}
+
+const PlainText = struct {
+    source_index: u32,
+};
+
+fn parseTextPlain(parent_tokens: *djot.TokCursor) ?PlainText {
+    var tokens = parent_tokens.*;
+
+    const token = tokens.next() orelse return null;
+    switch (token.kind) {
+        .eof,
+        .line_break,
+        .hard_line_break,
+        => return null,
+
+        .text,
+        .space,
+        .right_angle,
+        .heading,
+        .nonbreaking_space,
+        .marker,
+        .escape,
+        .asterisk,
+        .ticks,
+        => {
+            // Treat as text
+            parent_tokens.* = tokens;
+            return PlainText{ .source_index = token.start };
+        },
+    }
 }
 
 const Prefix = struct {
@@ -327,4 +454,9 @@ const Prefix = struct {
             prev.dump();
         }
     }
+};
+
+const PrevOpener = struct {
+    prev: ?*const PrevOpener = null,
+    tok: Token.Tok,
 };

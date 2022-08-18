@@ -19,9 +19,12 @@ pub const Kind = enum(u8) {
     asterisk,
 
     marker,
+
+    ticks,
 };
 
-pub const Slice = std.MultiArrayList(Tok).Slice;
+pub const MultiArrayList = std.MultiArrayList(Tok);
+pub const Slice = MultiArrayList.Slice;
 
 /// A cut down version of token, only include the kind and start index
 pub const Tok = struct {
@@ -65,6 +68,8 @@ pub fn parse(source: []const u8, start: usize) @This() {
         upper_roman,
         lower_alpha,
         upper_alpha,
+
+        ticks,
     };
 
     var res = @This(){
@@ -109,6 +114,11 @@ pub fn parse(source: []const u8, start: usize) @This() {
                     res.kind = .asterisk;
                     res.end = index;
                     state = .marker_end;
+                },
+                '`' => {
+                    res.kind = .ticks;
+                    res.end = index;
+                    state = .ticks;
                 },
                 '\\' => {
                     res.kind = .text;
@@ -172,6 +182,10 @@ pub fn parse(source: []const u8, start: usize) @This() {
                 ' ' => {
                     res.end = index;
                 },
+                else => break,
+            },
+            .ticks => switch (c) {
+                '`' => res.end = index,
                 else => break,
             },
             .escape => switch (c) {

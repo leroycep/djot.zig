@@ -40,7 +40,7 @@ pub fn toHtml(allocator: std.mem.Allocator, source: []const u8) ![]const u8 {
             },
 
             .start_paragraph => try html.appendSlice("<p>"),
-            .close_paragraph => try html.appendSlice("</p>"),
+            .close_paragraph => try html.appendSlice("</p>\n"),
 
             .start_heading => try html.writer().print("<h{}>", .{doc.events.items(.data)[event_index].start_heading}),
             .close_heading => try html.writer().print("</h{}>", .{doc.events.items(.data)[event_index].close_heading}),
@@ -53,6 +53,9 @@ pub fn toHtml(allocator: std.mem.Allocator, source: []const u8) ![]const u8 {
 
             .start_quote => try html.appendSlice("<quote>"),
             .close_quote => try html.appendSlice("</quote>"),
+
+            .start_verbatim => try html.appendSlice("<code>"),
+            .close_verbatim => try html.appendSlice("</code>"),
         }
     }
 
@@ -98,6 +101,10 @@ pub const Event = union(Kind) {
     start_list_item: SourceIndex,
     close_list_item: SourceIndex,
 
+    // Inline verbatim text
+    start_verbatim,
+    close_verbatim,
+
     pub const List = struct {
         style: Marker.Style,
     };
@@ -121,6 +128,9 @@ pub const Event = union(Kind) {
 
         start_list_item,
         close_list_item,
+
+        start_verbatim,
+        close_verbatim,
     };
 
     /// Only valid for events with a SourceIndex payload
@@ -176,6 +186,8 @@ pub const Event = union(Kind) {
                 .close_paragraph,
                 .start_quote,
                 .close_quote,
+                .start_verbatim,
+                .close_verbatim,
                 => {},
             }
         }
@@ -294,8 +306,15 @@ pub const TokCursor = struct {
         };
     }
 
-    pub fn next(this: *@This()) ?Token.Kind {
-        return bolt.raw.next(Token.Kind, Index, this.tokens.items(.kind), &this.index);
+    pub fn next(this: *@This()) ?Token.Tok {
+        const index = this.index;
+        if (bolt.raw.next(Token.Kind, Index, this.tokens.items(.kind), &this.index)) |kind| {
+            return Token.Tok{
+                .start = this.tokens.items(.start)[index],
+                .kind = kind,
+            };
+        }
+        return null;
     }
 
     pub fn expect(this: *@This(), expected: Token.Kind) ?Index {
@@ -312,6 +331,17 @@ pub const TokCursor = struct {
 
     pub fn startOf(this: @This(), index: Index) u32 {
         return this.tokens.items(.start)[index];
+    }
+
+    pub fn kindOf(this: @This(), index: Index) Token.Kind {
+        return this.tokens.items(.kind)[index];
+    }
+
+    pub fn tokOf(this: @This(), index: Index) Token.Tok {
+        return Token.Tok{
+            .start = this.startOf(index),
+            .kind = this.kindOf(index),
+        };
     }
 
     pub fn token(this: @This(), index: Index) Token {
