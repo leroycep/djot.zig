@@ -1,5 +1,7 @@
 const std = @import("std");
-const parselib = @import("./parse.zig");
+const bolt = @import("./bolt.zig");
+const djot = @import("./djot.zig");
+const Token = @import("./Token.zig");
 
 style: Style,
 start: usize,
@@ -78,6 +80,12 @@ pub const Style = enum {
     }
 };
 
+pub fn getStyle(source: []const u8, token: Token) ?Marker.Style {
+    var idx: usize = token.start;
+    const marker = parse(source, &idx) orelse return null;
+    return marker.style;
+}
+
 pub fn parse(source: []const u8, parent_index: *usize) ?Marker {
     return parseEnclosedMarker(source, parent_index) orelse
         parseDefinitionMarker(source, parent_index) orelse
@@ -89,9 +97,9 @@ fn parseEnclosedMarker(source: []const u8, parent_index: *usize) ?Marker {
     const start = parent_index.*;
     var index = start;
 
-    _ = parselib.expect(u8, source, &index, '(') orelse return null;
+    _ = bolt.raw.expect(u8, usize, source, &index, '(') orelse return null;
     const text = parseOrderedMarkerText(source, &index) orelse return null;
-    _ = parselib.expect(u8, source, &index, ')') orelse return null;
+    _ = bolt.raw.expect(u8, usize, source, &index, ')') orelse return null;
 
     parent_index.* = index;
     return Marker{
@@ -111,7 +119,7 @@ fn parseDefinitionMarker(source: []const u8, parent_index: *usize) ?Marker {
     const start = parent_index.*;
     var index = start;
 
-    _ = parselib.expect(u8, source, &index, ':') orelse return null;
+    _ = bolt.raw.expect(u8, usize, source, &index, ':') orelse return null;
 
     parent_index.* = index;
     return Marker{
@@ -125,7 +133,7 @@ fn parseBulletMarker(source: []const u8, parent_index: *usize) ?Marker {
     const start = parent_index.*;
     var index = start;
 
-    const style = switch (parselib.next(u8, source, &index) orelse return null) {
+    const style = switch (bolt.raw.next(u8, usize, source, &index) orelse return null) {
         '*' => Style.asterisk,
         '-' => Style.hyphen,
         '+' => Style.plus,
@@ -156,11 +164,11 @@ fn parseBulletMarker(source: []const u8, parent_index: *usize) ?Marker {
 
 fn incrementIfCheckBox(source: []const u8, index: *usize) ?void {
     var i = index.*;
-    _ = parselib.expect(u8, source, &i, ' ') orelse return null;
-    _ = parselib.expect(u8, source, &i, '[') orelse return null;
-    _ = parselib.expectInList(u8, source, &i, " xX") orelse return null;
-    _ = parselib.expect(u8, source, &i, ']') orelse return null;
-    //_ = parselib.expectInList(u8, source, &i, " \n") orelse return null;
+    _ = bolt.raw.expect(u8, usize, source, &i, ' ') orelse return null;
+    _ = bolt.raw.expect(u8, usize, source, &i, '[') orelse return null;
+    _ = bolt.raw.expectInList(u8, usize, source, &i, " xX") orelse return null;
+    _ = bolt.raw.expect(u8, usize, source, &i, ']') orelse return null;
+    //_ = bolt.raw.expectInList(u8, usize, source, &i, " \n") orelse return null;
     index.* = i;
 }
 
@@ -169,13 +177,13 @@ fn parseOrderedMarker(source: []const u8, parent_index: *usize) ?Marker {
     var index = parent_index.*;
 
     const text = parseOrderedMarkerText(source, &index) orelse return null;
-    const is_period = switch (parselib.next(u8, source, &index) orelse return null) {
+    const is_period = switch (bolt.raw.next(u8, usize, source, &index) orelse return null) {
         '.' => true,
         ')' => false,
         else => return null,
     };
 
-    //_ = parselib.expectInList(u8, source, &index, " \n") orelse return null;
+    //_ = bolt.raw.expectInList(u8, usize, source, &index, " \n") orelse return null;
 
     parent_index.* = index;
     return Marker{
@@ -228,21 +236,21 @@ fn parseOrderedMarkerText(source: []const u8, parent_index: *usize) ?MarkerText 
     };
 
     switch (res.style) {
-        .decimal => while (parselib.expectInRange(u8, source, &res.end, '0', '9')) |_| {},
-        .lower_alpha => while (parselib.expectInRange(u8, source, &res.end, 'a', 'z')) |_| {},
-        .upper_alpha => while (parselib.expectInRange(u8, source, &res.end, 'A', 'Z')) |_| {},
+        .decimal => while (bolt.raw.expectInRange(u8, usize, source, &res.end, '0', '9')) |_| {},
+        .lower_alpha => while (bolt.raw.expectInRange(u8, usize, source, &res.end, 'a', 'z')) |_| {},
+        .upper_alpha => while (bolt.raw.expectInRange(u8, usize, source, &res.end, 'A', 'Z')) |_| {},
         .lower_roman => {
-            while (parselib.expectInList(u8, source, &res.end, "ivxlcdm")) |_| {}
-            if (parselib.expectInRange(u8, source, &res.end, 'a', 'z')) |_| {
+            while (bolt.raw.expectInList(u8, usize, source, &res.end, "ivxlcdm")) |_| {}
+            if (bolt.raw.expectInRange(u8, usize, source, &res.end, 'a', 'z')) |_| {
                 res.style = .lower_alpha;
-                while (parselib.expectInRange(u8, source, &res.end, 'a', 'z')) |_| {}
+                while (bolt.raw.expectInRange(u8, usize, source, &res.end, 'a', 'z')) |_| {}
             }
         },
         .upper_roman => {
-            while (parselib.expectInList(u8, source, &res.end, "IVXLCDM")) |_| {}
-            if (parselib.expectInRange(u8, source, &res.end, 'A', 'Z')) |_| {
+            while (bolt.raw.expectInList(u8, usize, source, &res.end, "IVXLCDM")) |_| {}
+            if (bolt.raw.expectInRange(u8, usize, source, &res.end, 'A', 'Z')) |_| {
                 res.style = .upper_alpha;
-                while (parselib.expectInRange(u8, source, &res.end, 'A', 'Z')) |_| {}
+                while (bolt.raw.expectInRange(u8, usize, source, &res.end, 'A', 'Z')) |_| {}
             }
         },
     }
