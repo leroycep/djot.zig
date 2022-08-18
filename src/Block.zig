@@ -347,10 +347,9 @@ fn parseTextSpan(parent_events: *djot.EventCursor, parent_tokens: *djot.TokCurso
                 {
                     // start a new verbatim span
                     var verbatim_events = events;
-                    _ = try verbatim_events.append(.start_verbatim);
-                    if (try parseTextSpan(&verbatim_events, &lookahead, prefix, .{ .prev = if (opener) |o| &o else null, .tok = token })) |_| {
-                        _ = try verbatim_events.append(.close_verbatim);
+                    if (try parseTextSpanVerbatim(&verbatim_events, &tokens, prefix, if (opener) |o| &o else null)) |_| {
                         events = verbatim_events;
+                        lookahead = tokens;
                     }
                 }
             },
