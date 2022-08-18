@@ -161,6 +161,8 @@ pub fn parse(source: []const u8, start: usize) @This() {
                 else => break,
             },
             .text => switch (c) {
+                '`' => break,
+
                 '\n' => state = .text_newline,
                 else => res.end = index,
             },
@@ -171,6 +173,7 @@ pub fn parse(source: []const u8, start: usize) @This() {
                 '+',
                 '*',
                 '>',
+                '`',
                 => break,
 
                 else => {
@@ -249,7 +252,9 @@ pub fn parse(source: []const u8, start: usize) @This() {
                     state = .marker_end;
                 },
 
-                '\n' => break,
+                '`',
+                '\n',
+                => break,
 
                 else => {
                     res.end = index;
@@ -270,7 +275,9 @@ pub fn parse(source: []const u8, start: usize) @This() {
                     state = .marker_end;
                 },
 
-                '\n' => break,
+                '`',
+                '\n',
+                => break,
 
                 else => {
                     res.end = index;
@@ -287,7 +294,9 @@ pub fn parse(source: []const u8, start: usize) @This() {
                     state = .marker_end;
                 },
 
-                '\n' => break,
+                '`',
+                '\n',
+                => break,
 
                 else => {
                     res.end = index;
@@ -304,7 +313,9 @@ pub fn parse(source: []const u8, start: usize) @This() {
                     state = .marker_end;
                 },
 
-                '\n' => break,
+                '`',
+                '\n',
+                => break,
 
                 else => {
                     res.end = index;

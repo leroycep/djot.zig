@@ -279,7 +279,6 @@ fn parseTextSpan(parent_events: *djot.EventCursor, parent_tokens: *djot.TokCurso
     var events = parent_events.*;
     var tokens = parent_tokens.*;
 
-    std.debug.print("{s}:{}\n", .{ @src().fn_name, @src().line });
     if (try parseTextSpanVerbatim(&events, &tokens, prefix, if (opener) |o| &o else null)) |_| {
         parent_tokens.* = tokens;
         parent_events.* = events;
@@ -333,13 +332,13 @@ fn parseTextSpan(parent_events: *djot.EventCursor, parent_tokens: *djot.TokCurso
             },
 
             .ticks => {
-                std.debug.print("{s}:{}", .{ @src().fn_name, @src().line });
                 if (opener) |o| blk: {
                     if (o.tok.kind != .ticks) break :blk;
                     const opener_ticks = Token.parse(tokens.source, o.tok.start);
-                    const these_ticks = Token.parse(tokens.source, o.tok.start);
+                    const these_ticks = lookahead.token(lookahead.index - 1);
                     if (opener_ticks.end - opener_ticks.start == these_ticks.end - these_ticks.start) {
                         // Exit loop, return value
+                        tokens.index = lookahead.index - 1;
                         break;
                     }
                 }
@@ -350,7 +349,6 @@ fn parseTextSpan(parent_events: *djot.EventCursor, parent_tokens: *djot.TokCurso
                     var verbatim_events = events;
                     _ = try verbatim_events.append(.start_verbatim);
                     if (try parseTextSpan(&verbatim_events, &lookahead, prefix, .{ .prev = if (opener) |o| &o else null, .tok = token })) |_| {
-                        std.debug.print("{s}:{}", .{ @src().fn_name, @src().line });
                         _ = try verbatim_events.append(.close_verbatim);
                         events = verbatim_events;
                     }
@@ -372,15 +370,91 @@ fn parseTextSpan(parent_events: *djot.EventCursor, parent_tokens: *djot.TokCurso
 fn parseTextSpanVerbatim(parent_events: *djot.EventCursor, parent_tokens: *djot.TokCursor, prefix: ?*const Prefix, prev_opener: ?*const PrevOpener) djot.Error!?void {
     var events = parent_events.*;
     var tokens = parent_tokens.*;
-    std.debug.print("{s}:{}\n", .{ @src().fn_name, @src().line });
 
     const ticks_open = tokens.expect(.ticks) orelse return null;
     _ = try events.append(.start_verbatim);
 
-    _ = (try parseTextSpan(&events, &tokens, prefix, .{ .prev = prev_opener, .tok = tokens.tokOf(ticks_open) })) orelse return null;
+    _ = (try parseTextSpanPlain(&events, &tokens, prefix, .{ .prev = prev_opener, .tok = tokens.tokOf(ticks_open) })) orelse return null;
 
-    std.debug.print("{s}:{}\n", .{ @src().fn_name, @src().line });
+    if (tokens.expect(.ticks)) |ticks_close| {
+        // TODO: ensure it matches
+        _ = ticks_close;
+    }
     _ = try events.append(.close_verbatim);
+
+    parent_tokens.* = tokens;
+    parent_events.* = events;
+}
+
+fn parseTextSpanPlain(parent_events: *djot.EventCursor, parent_tokens: *djot.TokCursor, prefix: ?*const Prefix, opener: ?PrevOpener) djot.Error!?void {
+    var events = parent_events.*;
+    var tokens = parent_tokens.*;
+
+    var lookahead = tokens;
+    while (lookahead.next()) |token| : (tokens = lookahead) {
+        switch (token.kind) {
+            .eof => if (opener) |o| {
+                if (o.tok.kind == .ticks) break;
+                return null;
+            } else {
+                break;
+            },
+
+            .line_break => {
+                if (lookahead.expectInList(&.{ .line_break, .eof })) |_| {
+                    break;
+                }
+                if (prefix) |p| {
+                    if (!p.parsePrefix(&lookahead)) {
+                        break;
+                    }
+                }
+                _ = try events.append(.{ .text = token.start });
+            },
+
+            .text,
+            .space,
+            .right_angle,
+            .heading,
+            .nonbreaking_space,
+            => {
+                // Treat as text
+                _ = try events.append(.{ .text = token.start });
+            },
+
+            .escape => {
+                // TODO: Append as an escape event
+            },
+            .hard_line_break => {
+                // TODO: Append hard_line_break event
+            },
+
+            .asterisk => {
+                // TODO: parse strong span
+            },
+
+            .ticks => {
+                // Only exit if it ends a previous open
+                if (opener) |o| blk: {
+                    if (o.tok.kind != .ticks) break :blk;
+                    const opener_ticks = Token.parse(tokens.source, o.tok.start);
+                    const these_ticks = lookahead.token(lookahead.index - 1);
+                    if (opener_ticks.end - opener_ticks.start == these_ticks.end - these_ticks.start) {
+                        // Exit loop, return value
+                        tokens.index = lookahead.index - 1;
+                        break;
+                    }
+                }
+                _ = try events.append(.{ .text = token.start });
+            },
+
+            .marker => break,
+        }
+
+        if (prefix) |p| {
+            if (!p.parsePrefix(&lookahead)) break;
+        }
+    }
 
     parent_tokens.* = tokens;
     parent_events.* = events;
