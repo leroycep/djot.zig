@@ -30,6 +30,11 @@ pub fn build(b: *std.build.Builder) void {
     exe_tests.setBuildMode(mode);
     exe_tests.setFilter(b.option([]const u8, "test-filter", "Set the test filter"));
 
+    const rr = b.option(bool, "rr", "Record test run with rr debugger") orelse false;
+    if (rr) {
+        exe_tests.setExecCmd(&.{ "rr", "record", null });
+    }
+
     const test_step = b.step("test", "Run unit tests");
     test_step.dependOn(&exe_tests.step);
 
