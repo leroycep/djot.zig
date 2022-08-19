@@ -158,13 +158,19 @@ pub const Event = union(Kind) {
     /// Only valid for events with a SourceIndex payload
     pub fn asText(this: @This(), source: []const u8) []const u8 {
         switch (this) {
-            .text,
-            .start_list_item,
-            .close_list_item,
-            => |source_index| {
+            .text => |source_index| {
                 const token = Token.parse(source, source_index);
                 return source[token.start..token.end];
             },
+
+            .start_list_item,
+            .close_list_item,
+            => |source_index| {
+                var source_pos: usize = source_index;
+                const marker = Marker.parse(source, &source_pos).?;
+                return source[marker.start..marker.end];
+            },
+
             .escaped => |source_index| {
                 const token = Token.parse(source, source_index);
                 return source[token.start + 1 .. token.end];
@@ -193,15 +199,9 @@ pub const Event = union(Kind) {
             switch (this.event) {
                 .text,
                 .escaped,
-                => |_| try writer.print(" \"{}\"", .{std.zig.fmtEscapes(this.event.asText(this.source))}),
-
                 .start_list_item,
                 .close_list_item,
-                => |source_index| {
-                    var source_pos: usize = source_index;
-                    const marker = Marker.parse(this.source, &source_pos).?;
-                    try writer.print(" \"{}\"", .{std.zig.fmtEscapes(this.source[marker.start..marker.end])});
-                },
+                => |_| try writer.print(" \"{}\"", .{std.zig.fmtEscapes(this.event.asText(this.source))}),
 
                 .start_heading,
                 .close_heading,

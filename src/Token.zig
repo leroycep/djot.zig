@@ -23,9 +23,11 @@ pub const Kind = enum(u8) {
     asterisk,
     open_asterisk,
     close_asterisk,
+    space_asterisk,
     underscore,
     open_underscore,
     close_underscore,
+    space_underscore,
 
     pub fn isAsterisk(this: @This()) bool {
         switch (this) {
@@ -84,6 +86,7 @@ pub fn parse(source: []const u8, start: usize) @This() {
         default,
         text,
         text_newline,
+        text_space,
 
         heading,
         escape,
@@ -99,6 +102,7 @@ pub fn parse(source: []const u8, start: usize) @This() {
         lcurl,
         asterisk,
         underscore,
+        space,
     };
 
     var res = @This(){
@@ -122,7 +126,7 @@ pub fn parse(source: []const u8, start: usize) @This() {
                 => {
                     res.kind = .space;
                     res.end = index;
-                    break;
+                    state = .space;
                 },
                 '\n' => {
                     res.kind = .line_break;
@@ -209,6 +213,8 @@ pub fn parse(source: []const u8, start: usize) @This() {
                 '\\',
                 => break,
 
+                ' ' => state = .text_space,
+
                 '\n' => state = .text_newline,
                 else => res.end = index,
             },
@@ -222,6 +228,23 @@ pub fn parse(source: []const u8, start: usize) @This() {
                 '`',
                 '_',
                 '{',
+                '\\',
+                => break,
+
+                ' ' => state = .text_space,
+
+                else => {
+                    res.end = index;
+                    state = .text;
+                },
+            },
+            .text_space => switch (c) {
+                '`',
+                '*',
+                '_',
+                ' ',
+                '{',
+                '\n',
                 '\\',
                 => break,
 
@@ -257,7 +280,6 @@ pub fn parse(source: []const u8, start: usize) @This() {
             .marker_end => switch (c) {
                 ' ',
                 '\t',
-                '\n',
                 => {
                     res.kind = .marker;
                     res.end = index;
@@ -408,6 +430,19 @@ pub fn parse(source: []const u8, start: usize) @This() {
             .underscore => switch (c) {
                 '}' => {
                     res.kind = .close_underscore;
+                    res.end = index;
+                    break;
+                },
+                else => break,
+            },
+            .space => switch (c) {
+                '*' => {
+                    res.kind = .space_asterisk;
+                    res.end = index;
+                    break;
+                },
+                '_' => {
+                    res.kind = .space_underscore;
                     res.end = index;
                     break;
                 },

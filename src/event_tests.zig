@@ -9,9 +9,11 @@ test "events heading" {
         \\
     , &.{
         .{ .start_heading = 2 },
-        .{ .text = 
-        \\A level _two_ heading
-        },
+        .{ .text = "A level " },
+        .start_emphasis,
+        .{ .text = "two" },
+        .close_emphasis,
+        .{ .text = " heading" },
         .{ .close_heading = 2 },
     });
 }
