@@ -25,18 +25,19 @@ pub fn build(b: *std.build.Builder) void {
     const run_step = b.step("run", "Run the app");
     run_step.dependOn(&run_cmd.step);
 
-    const exe_tests = b.addTest("src/main.zig");
+    const exe_tests = b.addTestExe("djot-test", "src/main.zig");
     exe_tests.setTarget(target);
     exe_tests.setBuildMode(mode);
     exe_tests.setFilter(b.option([]const u8, "test-filter", "Set the test filter"));
 
-    const rr = b.option(bool, "rr", "Record test run with rr debugger") orelse false;
-    if (rr) {
-        exe_tests.setExecCmd(&.{ "rr", "record", null });
+    if (b.option(bool, "djot-test", "Install djot-test (default: false)") orelse false) {
+        exe_tests.install();
     }
 
+    const test_run = exe_tests.run();
+
     const test_step = b.step("test", "Run unit tests");
-    test_step.dependOn(&exe_tests.step);
+    test_step.dependOn(&test_run.step);
 
     buildConvertDjotHtmlTests(b, target, mode);
 }

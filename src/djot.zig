@@ -18,7 +18,9 @@ pub fn toHtml(allocator: std.mem.Allocator, source: []const u8) ![]const u8 {
     defer html.deinit();
     for (doc.events.items(.tag)) |event_kind, event_index| {
         switch (event_kind) {
-            .text => {
+            .text,
+            .escaped,
+            => {
                 const t = doc.asText(event_index);
                 var i: usize = 0;
                 while (i < t.len) {
@@ -59,6 +61,9 @@ pub fn toHtml(allocator: std.mem.Allocator, source: []const u8) ![]const u8 {
 
             .start_strong => try html.appendSlice("<strong>"),
             .close_strong => try html.appendSlice("</strong>"),
+
+            .start_emphasis => try html.appendSlice("<em>"),
+            .close_emphasis => try html.appendSlice("</em>"),
         }
     }
 
@@ -88,6 +93,7 @@ pub const Document = struct {
 
 pub const Event = union(Kind) {
     text: SourceIndex,
+    escaped: SourceIndex,
 
     start_paragraph,
     close_paragraph,
@@ -111,6 +117,9 @@ pub const Event = union(Kind) {
     start_strong,
     close_strong,
 
+    start_emphasis,
+    close_emphasis,
+
     pub const List = struct {
         style: Marker.Style,
     };
@@ -119,6 +128,7 @@ pub const Event = union(Kind) {
 
     pub const Kind = enum {
         text,
+        escaped,
 
         start_paragraph,
         close_paragraph,
@@ -140,6 +150,9 @@ pub const Event = union(Kind) {
 
         start_strong,
         close_strong,
+
+        start_emphasis,
+        close_emphasis,
     };
 
     /// Only valid for events with a SourceIndex payload
@@ -151,6 +164,10 @@ pub const Event = union(Kind) {
             => |source_index| {
                 const token = Token.parse(source, source_index);
                 return source[token.start..token.end];
+            },
+            .escaped => |source_index| {
+                const token = Token.parse(source, source_index);
+                return source[token.start + 1 .. token.end];
             },
             else => std.debug.panic("Event {s} does not have associated text", .{std.meta.tagName(this)}),
         }
@@ -174,10 +191,9 @@ pub const Event = union(Kind) {
             _ = options;
             try writer.print("{s}", .{std.meta.tagName(this.event)});
             switch (this.event) {
-                .text => |source_index| {
-                    const token = Token.parse(this.source, source_index);
-                    try writer.print(" \"{}\"", .{std.zig.fmtEscapes(this.source[token.start..token.end])});
-                },
+                .text,
+                .escaped,
+                => |_| try writer.print(" \"{}\"", .{std.zig.fmtEscapes(this.event.asText(this.source))}),
 
                 .start_list_item,
                 .close_list_item,
@@ -204,6 +220,8 @@ pub const Event = union(Kind) {
                 .close_verbatim,
                 .start_strong,
                 .close_strong,
+                .start_emphasis,
+                .close_emphasis,
                 => {},
             }
         }
@@ -238,6 +256,13 @@ pub fn parse(allocator: std.mem.Allocator, source: []const u8) Error!Document {
     _ = try blocks.parseBlocks(&event_cursor, &tok_cursor, null);
 
     events.len = event_cursor.index;
+
+    if (true) {
+        std.debug.print("{s}:{}\n", .{ @src().fn_name, @src().line });
+        for (events.items(.tag)) |_, i| {
+            std.debug.print("event[{}] = {}\n", .{ i, events.get(i).toUnion().fmtWithSource(source) });
+        }
+    }
 
     return Document{
         .source = source,
@@ -327,6 +352,13 @@ pub const TokCursor = struct {
             .tokens = this.tokens,
             .index = index,
         };
+    }
+
+    pub fn current(this: @This()) ?Token.Tok {
+        if (this.index < this.tokens.len) {
+            return this.tokOf(this.index);
+        }
+        return null;
     }
 
     pub fn next(this: *@This()) ?Token.Tok {

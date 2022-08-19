@@ -57,7 +57,7 @@ pub fn parseBlock(parent_events: *djot.EventCursor, parent_tokens: *djot.TokCurs
     var tight = true;
 
     blk: {
-        if (try parseHeading(&events, &tokens)) |_| {
+        if (try parseHeading(&events, &tokens, prefix)) |_| {
             break :blk;
         }
 
@@ -108,7 +108,7 @@ pub fn parseNewlinePrefix(parent_tokens: *djot.TokCursor, prefix: ?*const Prefix
     return was_newline;
 }
 
-pub fn parseHeading(parent_events: *djot.EventCursor, parent_tokens: *djot.TokCursor) djot.Error!?void {
+pub fn parseHeading(parent_events: *djot.EventCursor, parent_tokens: *djot.TokCursor, prefix: ?*const Prefix) djot.Error!?void {
     var tokens = parent_tokens.*;
     var events = parent_events.*;
 
@@ -120,8 +120,7 @@ pub fn parseHeading(parent_events: *djot.EventCursor, parent_tokens: *djot.TokCu
 
     _ = try events.append(.{ .start_heading = level });
 
-    const text = tokens.expect(.text) orelse return null;
-    _ = try events.append(.{ .text = tokens.tokens.items(.start)[text] });
+    _ = (try parseTextSpans(&events, &tokens, prefix, null)) orelse return null;
 
     _ = try events.append(.{ .close_heading = level });
 
@@ -263,7 +262,7 @@ fn parseParagraph(parent_events: *djot.EventCursor, parent_tokens: *djot.TokCurs
 
     while (tokens.expect(.space)) |_| {}
 
-    (try parseTextSpan(&events, &tokens, prefix, null)) orelse return null;
+    (try parseTextSpans(&events, &tokens, prefix, null)) orelse return null;
 
     _ = tokens.expect(.line_break);
 
@@ -273,132 +272,136 @@ fn parseParagraph(parent_events: *djot.EventCursor, parent_tokens: *djot.TokCurs
     parent_events.* = events;
 }
 
-fn parseTextSpan(parent_events: *djot.EventCursor, parent_tokens: *djot.TokCursor, prefix: ?*const Prefix, opener: ?PrevOpener) djot.Error!?void {
+fn parseTextSpans(parent_events: *djot.EventCursor, parent_tokens: *djot.TokCursor, prefix: ?*const Prefix, opener: ?*const PrevOpener) djot.Error!?void {
     var events = parent_events.*;
     var tokens = parent_tokens.*;
 
-    //if (try parseTextSpanStrong(&events, &tokens, prefix, if (opener) |o| &o else null)) |_| {
-    //    parent_tokens.* = tokens;
-    //    parent_events.* = events;
-    //    return;
-    //}
+    _ = try parseTextSpan(&events, &tokens, prefix, opener) orelse return null;
 
-    if (try parseTextSpanVerbatim(&events, &tokens, prefix, if (opener) |o| &o else null)) |_| {
-        parent_tokens.* = tokens;
-        parent_events.* = events;
-        return;
-    }
+    while (true) {
+        var lookahead = tokens;
+        var lookahead_events = events;
 
-    const first_text = parseTextPlain(&tokens) orelse return null;
-    _ = try events.append(.{ .text = first_text.source_index });
-
-    var lookahead = tokens;
-    while (lookahead.next()) |token| : (tokens = lookahead) {
-        switch (token.kind) {
-            .eof => if (opener) |o| {
-                if (o.tok.kind == .ticks) break;
-                return null;
-            } else {
-                break;
-            },
-
-            .line_break => {
-                if (lookahead.expectInList(&.{ .line_break, .eof })) |_| {
-                    break;
-                }
-                if (prefix) |p| {
-                    if (!p.parsePrefix(&lookahead)) {
-                        break;
-                    }
-                }
-                _ = try events.append(.{ .text = token.start });
-            },
-
-            .text,
-            .space,
-            .right_angle,
-            .heading,
-            .nonbreaking_space,
-            => {
-                // Treat as text
-                _ = try events.append(.{ .text = token.start });
-            },
-
-            .escape => {
-                // TODO: Append as an escape event
-            },
-            .hard_line_break => {
-                // TODO: Append hard_line_break event
-            },
-
-            .asterisk => {
-                // TODO: parse strong span
-                if (opener) |o| {
-                    if (o.tok.kind == .asterisk) {
-                        // Exit loop, return value
-                        tokens.index = lookahead.index - 1;
-                        break;
-                    }
-                }
-
-                // TODO: parse strong span
-                // start a new verbatim span
-                var strong_events = events;
-                if (try parseTextSpanStrong(&strong_events, &tokens, prefix, if (opener) |o| &o else null)) |_| {
-                    events = strong_events;
-                    lookahead = tokens;
-                    continue;
-                }
-
-                _ = try events.append(.{ .text = token.start });
-            },
-
-            .ticks => {
-                if (opener) |o| blk: {
-                    if (o.tok.kind != .ticks) break :blk;
-                    const opener_ticks = Token.parse(tokens.source, o.tok.start);
-                    const these_ticks = lookahead.token(lookahead.index - 1);
-                    if (opener_ticks.end - opener_ticks.start == these_ticks.end - these_ticks.start) {
-                        // Exit loop, return value
-                        tokens.index = lookahead.index - 1;
-                        break;
-                    }
-                }
-
-                // TODO: parse verbatim span
-                {
-                    // start a new verbatim span
-                    var verbatim_events = events;
-                    if (try parseTextSpanVerbatim(&verbatim_events, &tokens, prefix, if (opener) |o| &o else null)) |_| {
-                        events = verbatim_events;
-                        lookahead = tokens;
-                    }
-                }
-            },
-
-            .marker => break,
+        if (lookahead.expect(.line_break)) |_| {
+            if (prefix) |p| {
+                if (!p.parsePrefix(&lookahead)) break;
+            }
         }
 
-        if (prefix) |p| {
-            if (!p.parsePrefix(&lookahead)) break;
-        }
+        _ = try parseTextSpan(&lookahead_events, &lookahead, prefix, opener) orelse break;
+
+        tokens = lookahead;
+        events = lookahead_events;
     }
 
     parent_tokens.* = tokens;
     parent_events.* = events;
 }
 
-fn parseTextSpanStrong(parent_events: *djot.EventCursor, parent_tokens: *djot.TokCursor, prefix: ?*const Prefix, prev_opener: ?*const PrevOpener) djot.Error!?void {
+fn parseTextSpan(parent_events: *djot.EventCursor, parent_tokens: *djot.TokCursor, prefix: ?*const Prefix, opener: ?*const PrevOpener) djot.Error!?void {
     var events = parent_events.*;
     var tokens = parent_tokens.*;
 
-    const asterisk_open = tokens.expect(.asterisk) orelse return null;
-    _ = try events.append(.start_strong);
+    const token = tokens.current() orelse return null;
+    switch (token.kind) {
+        .eof => return null,
+        .line_break => return null,
 
-    _ = (try parseTextSpan(&events, &tokens, prefix, .{ .prev = prev_opener, .tok = tokens.tokOf(asterisk_open) })) orelse return null;
+        .escape => {
+            _ = tokens.next();
+            _ = try events.append(.{ .escaped = token.start });
+        },
 
-    _ = tokens.expect(.asterisk) orelse return null;
-    _ = try events.append(.close_strong);
+        .hard_line_break => {
+            // TODO: Append hard_line_break event
+            _ = tokens.next();
+        },
+
+        .text,
+        .space,
+        .right_angle,
+        .heading,
+        .nonbreaking_space,
+        .marker,
+        => {
+            _ = tokens.next();
+            _ = try events.append(.{ .text = token.start });
+        },
+
+        .asterisk, .underscore => {
+            if (opener) |o| {
+                if (o.isEnd(tokens, tokens.index)) {
+                    return null;
+                }
+            }
+
+            (try parseInlineFormatting(&events, &tokens, prefix, opener)) orelse {
+                const plain = parseTextPlain(&tokens) orelse return null;
+                _ = try events.append(plain);
+            };
+        },
+        .ticks => (try parseTextSpanVerbatim(&events, &tokens, prefix, opener)) orelse {
+            const plain = parseTextPlain(&tokens) orelse return null;
+            _ = try events.append(plain);
+        },
+    }
+
+    parent_tokens.* = tokens;
+    parent_events.* = events;
+}
+
+fn parseTextSpanEmphasis(parent_events: *djot.EventCursor, parent_tokens: *djot.TokCursor, prefix: ?*const Prefix, prev_opener: ?*const PrevOpener) djot.Error!?void {
+    var events = parent_events.*;
+    var tokens = parent_tokens.*;
+
+    const underscore_open = tokens.expect(.underscore) orelse return null;
+    _ = try events.append(.start_emphasis);
+
+    _ = (try parseTextSpans(&events, &tokens, prefix, &.{ .prev = prev_opener, .tok = tokens.tokOf(underscore_open) })) orelse return null;
+
+    _ = tokens.expect(.underscore) orelse return null;
+    _ = try events.append(.close_emphasis);
+
+    parent_tokens.* = tokens;
+    parent_events.* = events;
+}
+
+fn parseInlineFormatting(parent_events: *djot.EventCursor, parent_tokens: *djot.TokCursor, prefix: ?*const Prefix, prev_opener: ?*const PrevOpener) djot.Error!?void {
+    var events = parent_events.*;
+    var tokens = parent_tokens.*;
+
+    const open = tokens.expectInList(&.{ .asterisk, .underscore }) orelse return null;
+    switch (tokens.kindOf(open)) {
+        .asterisk => _ = try events.append(.start_strong),
+        .underscore => _ = try events.append(.start_emphasis),
+        else => unreachable,
+    }
+    var num_open_tokens: u32 = 1;
+    while (tokens.expect(tokens.kindOf(open))) |_| : (num_open_tokens += 1) {
+        switch (tokens.kindOf(open)) {
+            .asterisk => _ = try events.append(.start_strong),
+            .underscore => _ = try events.append(.start_emphasis),
+            else => unreachable,
+        }
+    }
+
+    _ = (try parseTextSpans(&events, &tokens, prefix, &.{ .prev = prev_opener, .tok = tokens.tokOf(open) })) orelse return null;
+
+    _ = tokens.expect(tokens.kindOf(open)) orelse return null;
+    switch (tokens.kindOf(open)) {
+        .asterisk => _ = try events.append(.close_strong),
+        .underscore => _ = try events.append(.close_emphasis),
+        else => unreachable,
+    }
+    var num_close_tokens: u32 = 1;
+    while (tokens.expect(tokens.kindOf(open))) |_| : (num_close_tokens += 1) {
+        if (num_close_tokens >= num_open_tokens) break;
+        switch (tokens.kindOf(open)) {
+            .asterisk => _ = try events.append(.close_strong),
+            .underscore => _ = try events.append(.close_emphasis),
+            else => unreachable,
+        }
+    }
 
     parent_tokens.* = tokens;
     parent_events.* = events;
@@ -411,7 +414,7 @@ fn parseTextSpanVerbatim(parent_events: *djot.EventCursor, parent_tokens: *djot.
     const ticks_open = tokens.expect(.ticks) orelse return null;
     _ = try events.append(.start_verbatim);
 
-    _ = (try parseTextSpanPlain(&events, &tokens, prefix, .{ .prev = prev_opener, .tok = tokens.tokOf(ticks_open) })) orelse return null;
+    _ = (try parseTextSpanPlain(&events, &tokens, prefix, &.{ .prev = prev_opener, .tok = tokens.tokOf(ticks_open) })) orelse return null;
 
     if (tokens.expect(.ticks)) |ticks_close| {
         // TODO: ensure it matches
@@ -423,7 +426,7 @@ fn parseTextSpanVerbatim(parent_events: *djot.EventCursor, parent_tokens: *djot.
     parent_events.* = events;
 }
 
-fn parseTextSpanPlain(parent_events: *djot.EventCursor, parent_tokens: *djot.TokCursor, prefix: ?*const Prefix, opener: ?PrevOpener) djot.Error!?void {
+fn parseTextSpanPlain(parent_events: *djot.EventCursor, parent_tokens: *djot.TokCursor, prefix: ?*const Prefix, opener: ?*const PrevOpener) djot.Error!?void {
     var events = parent_events.*;
     var tokens = parent_tokens.*;
 
@@ -454,20 +457,18 @@ fn parseTextSpanPlain(parent_events: *djot.EventCursor, parent_tokens: *djot.Tok
             .right_angle,
             .heading,
             .nonbreaking_space,
+            .asterisk,
+            .underscore,
+            .marker,
             => {
                 // Treat as text
                 _ = try events.append(.{ .text = token.start });
             },
 
-            .escape => {
-                // TODO: Append as an escape event
-            },
+            .escape => _ = try events.append(.{ .escaped = token.start }),
+
             .hard_line_break => {
                 // TODO: Append hard_line_break event
-            },
-
-            .asterisk => {
-                // TODO: parse strong span
             },
 
             .ticks => {
@@ -484,8 +485,6 @@ fn parseTextSpanPlain(parent_events: *djot.EventCursor, parent_tokens: *djot.Tok
                 }
                 _ = try events.append(.{ .text = token.start });
             },
-
-            .marker => break,
         }
 
         if (prefix) |p| {
@@ -501,7 +500,7 @@ const PlainText = struct {
     source_index: u32,
 };
 
-fn parseTextPlain(parent_tokens: *djot.TokCursor) ?PlainText {
+fn parseTextPlain(parent_tokens: *djot.TokCursor) ?djot.Event {
     var tokens = parent_tokens.*;
 
     const token = tokens.next() orelse return null;
@@ -511,19 +510,24 @@ fn parseTextPlain(parent_tokens: *djot.TokCursor) ?PlainText {
         .hard_line_break,
         => return null,
 
+        .escape => {
+            parent_tokens.* = tokens;
+            return djot.Event{ .escaped = token.start };
+        },
+
         .text,
         .space,
         .right_angle,
         .heading,
         .nonbreaking_space,
         .marker,
-        .escape,
         .asterisk,
+        .underscore,
         .ticks,
         => {
             // Treat as text
             parent_tokens.* = tokens;
-            return PlainText{ .source_index = token.start };
+            return djot.Event{ .text = token.start };
         },
     }
 }
@@ -570,4 +574,15 @@ const Prefix = struct {
 const PrevOpener = struct {
     prev: ?*const PrevOpener = null,
     tok: Token.Tok,
+
+    pub fn isEnd(this: @This(), tokens: djot.TokCursor, index: djot.TokCursor.Index) bool {
+        switch (tokens.kindOf(index)) {
+            .asterisk,
+            .underscore,
+            => |kind| {
+                return this.tok.kind == kind;
+            },
+            else => return false,
+        }
+    }
 };

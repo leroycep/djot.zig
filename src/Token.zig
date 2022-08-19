@@ -21,6 +21,7 @@ pub const Kind = enum(u8) {
     marker,
 
     ticks,
+    underscore,
 };
 
 pub const MultiArrayList = std.MultiArrayList(Tok);
@@ -108,6 +109,11 @@ pub fn parse(source: []const u8, start: usize) @This() {
                     res.end = index;
                     break;
                 },
+                '_' => {
+                    res.kind = .underscore;
+                    res.end = index;
+                    break;
+                },
                 '-',
                 '+',
                 => {
@@ -161,22 +167,13 @@ pub fn parse(source: []const u8, start: usize) @This() {
                 else => break,
             },
             .text => switch (c) {
-                '`',
-                '*',
-                => break,
+                '`', '*', '_', '\\' => break,
 
                 '\n' => state = .text_newline,
                 else => res.end = index,
             },
             .text_newline => switch (c) {
-                '\n',
-                '0'...'9',
-                '-',
-                '+',
-                '*',
-                '>',
-                '`',
-                => break,
+                '\n', '0'...'9', '-', '+', '*', '>', '`', '_', '\\' => break,
 
                 else => {
                     res.end = index;
@@ -233,7 +230,9 @@ pub fn parse(source: []const u8, start: usize) @This() {
                     state = .marker_end;
                 },
 
-                '\n' => break,
+                '_',
+                '\n',
+                => break,
 
                 else => {
                     res.end = index;
@@ -256,6 +255,8 @@ pub fn parse(source: []const u8, start: usize) @This() {
 
                 '`',
                 '*',
+                '_',
+                '\\',
                 '\n',
                 => break,
 
@@ -280,6 +281,8 @@ pub fn parse(source: []const u8, start: usize) @This() {
 
                 '`',
                 '*',
+                '_',
+                '\\',
                 '\n',
                 => break,
 
@@ -300,6 +303,8 @@ pub fn parse(source: []const u8, start: usize) @This() {
 
                 '`',
                 '*',
+                '_',
+                '\\',
                 '\n',
                 => break,
 
@@ -320,6 +325,8 @@ pub fn parse(source: []const u8, start: usize) @This() {
 
                 '`',
                 '*',
+                '_',
+                '\\',
                 '\n',
                 => break,
 
