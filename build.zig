@@ -35,6 +35,7 @@ pub fn build(b: *std.build.Builder) void {
     }
 
     const test_run = exe_tests.run();
+    test_run.expected_exit_code = null;
 
     const test_step = b.step("test", "Run unit tests");
     test_step.dependOn(&test_run.step);
