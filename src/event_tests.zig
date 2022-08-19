@@ -271,6 +271,8 @@ const TestEvent = union(djot.Event.Kind) {
 
     start_link: []const u8,
     close_link: []const u8,
+    start_image_link: []const u8,
+    close_image_link: []const u8,
 
     pub fn format(
         this: @This(),
@@ -290,6 +292,8 @@ const TestEvent = union(djot.Event.Kind) {
             .autolink_email,
             .start_link,
             .close_link,
+            .start_image_link,
+            .close_image_link,
             => |text| try writer.print(" \"{}\"", .{std.zig.fmtEscapes(text)}),
 
             .start_heading,

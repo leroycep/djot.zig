@@ -330,6 +330,12 @@ fn parseTextSpan(parent_events: *djot.EventCursor, parent_tokens: *djot.TokCurso
             tokens.index += 1;
         },
 
+        .exclaimation => {
+            try parseInlineImageLink(&events, &tokens, prefix, opener) orelse {
+                _ = try events.append(.{ .text = token.start });
+                tokens.index += 1;
+            };
+        },
         .left_square => {
             try parseInlineLink(&events, &tokens, prefix, opener) orelse {
                 _ = try events.append(.{ .text = token.start });
@@ -382,6 +388,31 @@ fn parseTextSpan(parent_events: *djot.EventCursor, parent_tokens: *djot.TokCurso
             _ = try events.append(.{ .autolink_email = token.start });
             tokens.index += 1;
         },
+    }
+
+    parent_tokens.* = tokens;
+    parent_events.* = events;
+}
+
+fn parseInlineImageLink(parent_events: *djot.EventCursor, parent_tokens: *djot.TokCursor, prefix: ?*const Prefix, prev_opener: ?*const PrevOpener) djot.Error!?void {
+    var events = parent_events.*;
+    var tokens = parent_tokens.*;
+
+    _ = tokens.expect(.exclaimation) orelse return null;
+    const open_link_token = tokens.expect(.left_square) orelse return null;
+
+    const start_event = try events.append(.{ .start_image_link = undefined });
+
+    _ = (try parseTextSpans(&events, &tokens, prefix, &.{ .prev = prev_opener, .tok = tokens.tokOf(open_link_token) })) orelse return null;
+
+    switch (tokens.kindOf(tokens.index)) {
+        .inline_link_url => {
+            events.set(start_event, .{ .start_image_link = tokens.startOf(tokens.index) });
+            _ = try events.append(.{ .close_image_link = tokens.startOf(tokens.index) });
+            tokens.index += 1;
+        },
+
+        else => return null,
     }
 
     parent_tokens.* = tokens;
@@ -526,6 +557,7 @@ fn parseTextSpanVerbatim(parent_events: *djot.EventCursor, parent_tokens: *djot.
             .autolink,
             .autolink_email,
             .inline_link_url,
+            .exclaimation,
             => {
                 _ = try events.append(.{ .text = tokens.startOf(tokens.index) });
                 tokens.index += 1;

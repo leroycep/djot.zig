@@ -36,6 +36,7 @@ pub const Kind = enum(u8) {
     autolink,
     autolink_email,
     inline_link_url,
+    exclaimation,
 
     pub fn isAsterisk(this: @This()) bool {
         switch (this) {
@@ -173,6 +174,11 @@ pub fn parse(source: []const u8, start: usize) @This() {
                     res.end = index;
                     state = .lcurl;
                 },
+                '!' => {
+                    res.kind = .exclaimation;
+                    res.end = index;
+                    break;
+                },
                 '[' => {
                     res.kind = .left_square;
                     res.end = index;
@@ -241,6 +247,7 @@ pub fn parse(source: []const u8, start: usize) @This() {
                 '_',
                 '{',
                 '\\',
+                '!',
                 '[',
                 ']',
                 => break,
@@ -261,6 +268,7 @@ pub fn parse(source: []const u8, start: usize) @This() {
                 '_',
                 '{',
                 '\\',
+                '!',
                 '[',
                 ']',
                 => break,
@@ -280,6 +288,7 @@ pub fn parse(source: []const u8, start: usize) @This() {
                 '{',
                 '\n',
                 '\\',
+                '!',
                 '[',
                 ']',
                 => break,
@@ -335,6 +344,7 @@ pub fn parse(source: []const u8, start: usize) @This() {
 
                 '_',
                 '\n',
+                '!',
                 '[',
                 ']',
                 => break,
@@ -364,6 +374,7 @@ pub fn parse(source: []const u8, start: usize) @This() {
                 '{',
                 '\\',
                 '\n',
+                '!',
                 '[',
                 ']',
                 => break,
@@ -393,6 +404,7 @@ pub fn parse(source: []const u8, start: usize) @This() {
                 '{',
                 '\\',
                 '\n',
+                '!',
                 '[',
                 ']',
                 => break,
@@ -418,6 +430,7 @@ pub fn parse(source: []const u8, start: usize) @This() {
                 '{',
                 '\\',
                 '\n',
+                '!',
                 '[',
                 ']',
                 => break,
@@ -443,6 +456,7 @@ pub fn parse(source: []const u8, start: usize) @This() {
                 '{',
                 '\\',
                 '\n',
+                '!',
                 '[',
                 ']',
                 => break,

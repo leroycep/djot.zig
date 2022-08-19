@@ -14,6 +14,8 @@ pub fn toHtml(allocator: std.mem.Allocator, source: []const u8) ![]const u8 {
     var doc = try parse(allocator, source);
     defer doc.deinit(allocator);
 
+    var in_alt_text: u32 = 0;
+
     var html = std.ArrayList(u8).init(allocator);
     defer html.deinit();
     for (doc.events.items(.tag)) |event_kind, event_index| {
@@ -50,7 +52,7 @@ pub fn toHtml(allocator: std.mem.Allocator, source: []const u8) ![]const u8 {
                 try html.writer().print("<a href=\"mailto:{}\">{s}</a>", .{ std.zig.fmtEscapes(email), email });
             },
 
-            .start_link => {
+            .start_link => if (in_alt_text < 1) {
                 // Remove newlines from the url
                 const url = doc.asText(event_index);
                 var lines = std.mem.split(u8, url, "\n");
@@ -61,7 +63,26 @@ pub fn toHtml(allocator: std.mem.Allocator, source: []const u8) ![]const u8 {
                 }
                 try html.writer().writeAll("\">");
             },
-            .close_link => try html.writer().writeAll("</a>"),
+            .close_link => if (in_alt_text < 1) {
+                try html.writer().writeAll("</a>");
+            },
+
+            .start_image_link => {
+                try html.writer().writeAll("<img alt=\"");
+                in_alt_text += 1;
+            },
+            .close_image_link => {
+                // Remove newlines from the url
+                const url = doc.asText(event_index);
+                var lines = std.mem.split(u8, url, "\n");
+
+                try html.writer().writeAll("\" src=\"");
+                while (lines.next()) |line| {
+                    try html.writer().writeAll(line);
+                }
+                try html.writer().writeAll("\">");
+                in_alt_text -= 1;
+            },
 
             .start_paragraph => try html.appendSlice("<p>"),
             .close_paragraph => try html.appendSlice("</p>\n"),
@@ -147,6 +168,9 @@ pub const Event = union(Kind) {
     start_link: SourceIndex,
     close_link: SourceIndex,
 
+    start_image_link: SourceIndex,
+    close_image_link: SourceIndex,
+
     pub const List = struct {
         style: Marker.Style,
     };
@@ -185,6 +209,9 @@ pub const Event = union(Kind) {
 
         start_link,
         close_link,
+
+        start_image_link,
+        close_image_link,
     };
 
     /// Only valid for events with a SourceIndex payload
@@ -215,6 +242,8 @@ pub const Event = union(Kind) {
 
             .start_link,
             .close_link,
+            .start_image_link,
+            .close_image_link,
             => |source_index| {
                 const token = Token.parse(source, source_index);
                 return source[token.start + 2 .. token.end - 1];
@@ -250,6 +279,8 @@ pub const Event = union(Kind) {
                 .close_list_item,
                 .start_link,
                 .close_link,
+                .start_image_link,
+                .close_image_link,
                 => |_| try writer.print(" \"{}\"", .{std.zig.fmtEscapes(this.event.asText(this.source))}),
 
                 .start_heading,
