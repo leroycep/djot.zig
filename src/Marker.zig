@@ -93,6 +93,30 @@ pub fn parse(source: []const u8, parent_index: *usize) ?Marker {
         parseOrderedMarker(source, parent_index);
 }
 
+pub fn parseTok(parent_tokens: *djot.TokCursor) ?Marker {
+    var tokens = parent_tokens.*;
+
+    if (tokens.expect(.marker)) |token_index| {
+        const token = tokens.token(token_index);
+        parent_tokens.* = tokens;
+        return Marker{
+            .style = getStyle(tokens.source, token).?,
+            .start = token.start,
+            .end = token.end,
+        };
+    }
+
+    if (tokens.expectInList(&.{.asterisk})) |bullet_index| {
+        _ = tokens.expect(.space) orelse return null;
+        parent_tokens.* = tokens;
+        var marker_index: usize = tokens.startOf(bullet_index);
+        const marker = parse(tokens.source, &marker_index).?;
+        return marker;
+    }
+
+    return null;
+}
+
 fn parseEnclosedMarker(source: []const u8, parent_index: *usize) ?Marker {
     const start = parent_index.*;
     var index = start;

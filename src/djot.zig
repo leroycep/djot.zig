@@ -56,6 +56,9 @@ pub fn toHtml(allocator: std.mem.Allocator, source: []const u8) ![]const u8 {
 
             .start_verbatim => try html.appendSlice("<code>"),
             .close_verbatim => try html.appendSlice("</code>"),
+
+            .start_strong => try html.appendSlice("<strong>"),
+            .close_strong => try html.appendSlice("</strong>"),
         }
     }
 
@@ -105,6 +108,9 @@ pub const Event = union(Kind) {
     start_verbatim,
     close_verbatim,
 
+    start_strong,
+    close_strong,
+
     pub const List = struct {
         style: Marker.Style,
     };
@@ -131,6 +137,9 @@ pub const Event = union(Kind) {
 
         start_verbatim,
         close_verbatim,
+
+        start_strong,
+        close_strong,
     };
 
     /// Only valid for events with a SourceIndex payload
@@ -165,12 +174,17 @@ pub const Event = union(Kind) {
             _ = options;
             try writer.print("{s}", .{std.meta.tagName(this.event)});
             switch (this.event) {
-                .text,
+                .text => |source_index| {
+                    const token = Token.parse(this.source, source_index);
+                    try writer.print(" \"{}\"", .{std.zig.fmtEscapes(this.source[token.start..token.end])});
+                },
+
                 .start_list_item,
                 .close_list_item,
                 => |source_index| {
-                    const token = Token.parse(this.source, source_index);
-                    try writer.print(" \"{}\"", .{std.zig.fmtEscapes(this.source[token.start..token.end])});
+                    var source_pos: usize = source_index;
+                    const marker = Marker.parse(this.source, &source_pos).?;
+                    try writer.print(" \"{}\"", .{std.zig.fmtEscapes(this.source[marker.start..marker.end])});
                 },
 
                 .start_heading,
@@ -188,6 +202,8 @@ pub const Event = union(Kind) {
                 .close_quote,
                 .start_verbatim,
                 .close_verbatim,
+                .start_strong,
+                .close_strong,
                 => {},
             }
         }
@@ -211,6 +227,13 @@ pub fn parse(allocator: std.mem.Allocator, source: []const u8) Error!Document {
         .tokens = &tokens,
         .index = 0,
     };
+
+    if (true) {
+        std.debug.print("{s}:{}\n", .{ @src().fn_name, @src().line });
+        for (tokens.items(.kind)) |tag, i| {
+            std.debug.print("token[{}] = {} \"{}\"\n", .{ i, tag, std.zig.fmtEscapes(tok_cursor.text(@intCast(u32, i))) });
+        }
+    }
 
     _ = try blocks.parseBlocks(&event_cursor, &tok_cursor, null);
 

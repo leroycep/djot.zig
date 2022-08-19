@@ -234,9 +234,7 @@ fn parseListItem(parent_events: *djot.EventCursor, parent_tokens: *djot.TokCurso
 
     var tight = true;
 
-    const marker_token_index = tokens.expect(.marker) orelse return null;
-    const marker = tokens.token(marker_token_index);
-    const style = Marker.getStyle(tokens.source, marker) orelse return null;
+    const marker = Marker.parseTok(&tokens) orelse return null;
 
     const start = try events.append(.{ .start_list_item = @intCast(u32, marker.start) });
 
@@ -250,7 +248,7 @@ fn parseListItem(parent_events: *djot.EventCursor, parent_tokens: *djot.TokCurso
     parent_tokens.* = tokens;
     parent_events.* = events;
     return ListItem{
-        .style = style,
+        .style = marker.style,
         .tight = tight,
         .start = start,
         .close = close,
@@ -278,6 +276,12 @@ fn parseParagraph(parent_events: *djot.EventCursor, parent_tokens: *djot.TokCurs
 fn parseTextSpan(parent_events: *djot.EventCursor, parent_tokens: *djot.TokCursor, prefix: ?*const Prefix, opener: ?PrevOpener) djot.Error!?void {
     var events = parent_events.*;
     var tokens = parent_tokens.*;
+
+    //if (try parseTextSpanStrong(&events, &tokens, prefix, if (opener) |o| &o else null)) |_| {
+    //    parent_tokens.* = tokens;
+    //    parent_events.* = events;
+    //    return;
+    //}
 
     if (try parseTextSpanVerbatim(&events, &tokens, prefix, if (opener) |o| &o else null)) |_| {
         parent_tokens.* = tokens;
@@ -329,6 +333,24 @@ fn parseTextSpan(parent_events: *djot.EventCursor, parent_tokens: *djot.TokCurso
 
             .asterisk => {
                 // TODO: parse strong span
+                if (opener) |o| {
+                    if (o.tok.kind == .asterisk) {
+                        // Exit loop, return value
+                        tokens.index = lookahead.index - 1;
+                        break;
+                    }
+                }
+
+                // TODO: parse strong span
+                // start a new verbatim span
+                var strong_events = events;
+                if (try parseTextSpanStrong(&strong_events, &tokens, prefix, if (opener) |o| &o else null)) |_| {
+                    events = strong_events;
+                    lookahead = tokens;
+                    continue;
+                }
+
+                _ = try events.append(.{ .text = token.start });
             },
 
             .ticks => {
@@ -361,6 +383,22 @@ fn parseTextSpan(parent_events: *djot.EventCursor, parent_tokens: *djot.TokCurso
             if (!p.parsePrefix(&lookahead)) break;
         }
     }
+
+    parent_tokens.* = tokens;
+    parent_events.* = events;
+}
+
+fn parseTextSpanStrong(parent_events: *djot.EventCursor, parent_tokens: *djot.TokCursor, prefix: ?*const Prefix, prev_opener: ?*const PrevOpener) djot.Error!?void {
+    var events = parent_events.*;
+    var tokens = parent_tokens.*;
+
+    const asterisk_open = tokens.expect(.asterisk) orelse return null;
+    _ = try events.append(.start_strong);
+
+    _ = (try parseTextSpan(&events, &tokens, prefix, .{ .prev = prev_opener, .tok = tokens.tokOf(asterisk_open) })) orelse return null;
+
+    _ = tokens.expect(.asterisk) orelse return null;
+    _ = try events.append(.close_strong);
 
     parent_tokens.* = tokens;
     parent_events.* = events;

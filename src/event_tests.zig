@@ -53,12 +53,12 @@ test "events quote with a list in it" {
         .close_paragraph,
 
         .{ .start_list = .{ .style = .decimal_period } },
-        .{ .start_list_item = "1. " },
+        .{ .start_list_item = "1." },
         .{ .text = "with a" },
-        .{ .close_list_item = "1. " },
-        .{ .start_list_item = "2. " },
+        .{ .close_list_item = "1." },
+        .{ .start_list_item = "2." },
         .{ .text = "list in it" },
-        .{ .close_list_item = "2. " },
+        .{ .close_list_item = "2." },
         .{ .close_list = .{ .style = .decimal_period } },
 
         .close_quote,
@@ -90,7 +90,7 @@ test "events list item containing a block quote" {
     , &.{
         .{ .start_list = .{ .style = .decimal_period } },
 
-        .{ .start_list_item = "1. " },
+        .{ .start_list_item = "1." },
         .start_paragraph,
         .{ .text = 
         \\This is a
@@ -105,7 +105,7 @@ test "events list item containing a block quote" {
         },
         .close_paragraph,
         .close_quote,
-        .{ .close_list_item = "1. " },
+        .{ .close_list_item = "1." },
 
         .{ .close_list = .{ .style = .decimal_period } },
     });
@@ -121,7 +121,7 @@ test "events list item with second paragraph" {
     , &.{
         .{ .start_list = .{ .style = .decimal_period } },
 
-        .{ .start_list_item = "1. " },
+        .{ .start_list_item = "1." },
         .start_paragraph,
         .{ .text = 
         \\This is a
@@ -134,7 +134,7 @@ test "events list item with second paragraph" {
         \\list item.
         },
         .close_paragraph,
-        .{ .close_list_item = "1. " },
+        .{ .close_list_item = "1." },
 
         .{ .close_list = .{ .style = .decimal_period } },
     });
@@ -148,27 +148,27 @@ test "events 4 lists" {
         \\* bullet (style change)
     , &.{
         .{ .start_list = .{ .style = .lower_roman_paren } },
-        .{ .start_list_item = "i) " },
+        .{ .start_list_item = "i)" },
         .{ .text = "one" },
-        .{ .close_list_item = "i) " },
+        .{ .close_list_item = "i)" },
         .{ .close_list = .{ .style = .lower_roman_paren } },
 
         .{ .start_list = .{ .style = .lower_roman_period } },
-        .{ .start_list_item = "i. " },
+        .{ .start_list_item = "i." },
         .{ .text = "one (style change)" },
-        .{ .close_list_item = "i. " },
+        .{ .close_list_item = "i." },
         .{ .close_list = .{ .style = .lower_roman_period } },
 
         .{ .start_list = .{ .style = .plus } },
-        .{ .start_list_item = "+ " },
+        .{ .start_list_item = "+" },
         .{ .text = "bullet" },
-        .{ .close_list_item = "+ " },
+        .{ .close_list_item = "+" },
         .{ .close_list = .{ .style = .plus } },
 
         .{ .start_list = .{ .style = .asterisk } },
-        .{ .start_list_item = "* " },
+        .{ .start_list_item = "*" },
         .{ .text = "bullet (style change)" },
-        .{ .close_list_item = "* " },
+        .{ .close_list_item = "*" },
         .{ .close_list = .{ .style = .asterisk } },
     });
 }
@@ -180,13 +180,13 @@ test "events list: alpha/roman ambiguous" {
     , &.{
         .{ .start_list = .{ .style = .lower_alpha_period } },
 
-        .{ .start_list_item = "i. " },
+        .{ .start_list_item = "i." },
         .{ .text = "item" },
-        .{ .close_list_item = "i. " },
+        .{ .close_list_item = "i." },
 
-        .{ .start_list_item = "j. " },
+        .{ .start_list_item = "j." },
         .{ .text = "next item" },
-        .{ .close_list_item = "j. " },
+        .{ .close_list_item = "j." },
 
         .{ .close_list = .{ .style = .lower_alpha_period } },
     });
@@ -199,15 +199,15 @@ test "events list: start number" {
     , &.{
         .{ .start_list = .{ .style = .decimal_paren } },
 
-        .{ .start_list_item = "5) " },
+        .{ .start_list_item = "5)" },
         .{ .text = "five" },
-        .{ .close_list_item = "5) " },
+        .{ .close_list_item = "5)" },
 
-        .{ .start_list_item = "8) " },
+        .{ .start_list_item = "8)" },
         .{ .text = 
         \\six
         },
-        .{ .close_list_item = "8) " },
+        .{ .close_list_item = "8)" },
 
         .{ .close_list = .{ .style = .decimal_paren } },
     });
@@ -221,17 +221,17 @@ test "events loose list" {
     , &.{
         .{ .start_list = .{ .style = .hyphen } },
 
-        .{ .start_list_item = "- " },
+        .{ .start_list_item = "-" },
         .start_paragraph,
         .{ .text = "one" },
         .close_paragraph,
-        .{ .close_list_item = "- " },
+        .{ .close_list_item = "-" },
 
-        .{ .start_list_item = "- " },
+        .{ .start_list_item = "-" },
         .start_paragraph,
         .{ .text = "two" },
         .close_paragraph,
-        .{ .close_list_item = "- " },
+        .{ .close_list_item = "-" },
 
         .{ .close_list = .{ .style = .hyphen } },
     });
@@ -257,6 +257,9 @@ const TestEvent = union(djot.Event.Kind) {
 
     start_verbatim,
     close_verbatim,
+
+    start_strong,
+    close_strong,
 
     pub fn format(
         this: @This(),
@@ -288,6 +291,8 @@ const TestEvent = union(djot.Event.Kind) {
             .close_paragraph,
             .start_verbatim,
             .close_verbatim,
+            .start_strong,
+            .close_strong,
             => {},
         }
     }
