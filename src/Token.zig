@@ -16,12 +16,38 @@ pub const Kind = enum(u8) {
     escape,
     heading,
     right_angle,
-    asterisk,
 
     marker,
 
     ticks,
+    asterisk,
+    open_asterisk,
+    close_asterisk,
     underscore,
+    open_underscore,
+    close_underscore,
+
+    pub fn isAsterisk(this: @This()) bool {
+        switch (this) {
+            .asterisk,
+            .open_asterisk,
+            .close_asterisk,
+            => return true,
+
+            else => return false,
+        }
+    }
+
+    pub fn isUnderscore(this: @This()) bool {
+        switch (this) {
+            .underscore,
+            .open_underscore,
+            .close_underscore,
+            => return true,
+
+            else => return false,
+        }
+    }
 };
 
 pub const MultiArrayList = std.MultiArrayList(Tok);
@@ -60,7 +86,6 @@ pub fn parse(source: []const u8, start: usize) @This() {
         text_newline,
 
         heading,
-        spaces,
         escape,
 
         marker_end,
@@ -71,6 +96,9 @@ pub fn parse(source: []const u8, start: usize) @This() {
         upper_alpha,
 
         ticks,
+        lcurl,
+        asterisk,
+        underscore,
     };
 
     var res = @This(){
@@ -89,7 +117,9 @@ pub fn parse(source: []const u8, start: usize) @This() {
                     res.end = index;
                     state = .heading;
                 },
-                ' ' => {
+                ' ',
+                '\t',
+                => {
                     res.kind = .space;
                     res.end = index;
                     break;
@@ -107,12 +137,17 @@ pub fn parse(source: []const u8, start: usize) @This() {
                 '*' => {
                     res.kind = .asterisk;
                     res.end = index;
-                    break;
+                    state = .asterisk;
                 },
                 '_' => {
                     res.kind = .underscore;
                     res.end = index;
-                    break;
+                    state = .underscore;
+                },
+                '{' => {
+                    res.kind = .text;
+                    res.end = index;
+                    state = .lcurl;
                 },
                 '-',
                 '+',
@@ -167,24 +202,33 @@ pub fn parse(source: []const u8, start: usize) @This() {
                 else => break,
             },
             .text => switch (c) {
-                '`', '*', '_', '\\' => break,
+                '`',
+                '*',
+                '_',
+                '{',
+                '\\',
+                => break,
 
                 '\n' => state = .text_newline,
                 else => res.end = index,
             },
             .text_newline => switch (c) {
-                '\n', '0'...'9', '-', '+', '*', '>', '`', '_', '\\' => break,
+                '\n',
+                '0'...'9',
+                '-',
+                '+',
+                '*',
+                '>',
+                '`',
+                '_',
+                '{',
+                '\\',
+                => break,
 
                 else => {
                     res.end = index;
                     state = .text;
                 },
-            },
-            .spaces => switch (c) {
-                ' ' => {
-                    res.end = index;
-                },
-                else => break,
             },
             .ticks => switch (c) {
                 '`' => res.end = index,
@@ -212,6 +256,7 @@ pub fn parse(source: []const u8, start: usize) @This() {
             },
             .marker_end => switch (c) {
                 ' ',
+                '\t',
                 '\n',
                 => {
                     res.kind = .marker;
@@ -256,6 +301,7 @@ pub fn parse(source: []const u8, start: usize) @This() {
                 '`',
                 '*',
                 '_',
+                '{',
                 '\\',
                 '\n',
                 => break,
@@ -282,6 +328,7 @@ pub fn parse(source: []const u8, start: usize) @This() {
                 '`',
                 '*',
                 '_',
+                '{',
                 '\\',
                 '\n',
                 => break,
@@ -304,6 +351,7 @@ pub fn parse(source: []const u8, start: usize) @This() {
                 '`',
                 '*',
                 '_',
+                '{',
                 '\\',
                 '\n',
                 => break,
@@ -326,6 +374,7 @@ pub fn parse(source: []const u8, start: usize) @This() {
                 '`',
                 '*',
                 '_',
+                '{',
                 '\\',
                 '\n',
                 => break,
@@ -334,6 +383,35 @@ pub fn parse(source: []const u8, start: usize) @This() {
                     res.end = index;
                     state = .text;
                 },
+            },
+            .lcurl => switch (c) {
+                '*' => {
+                    res.kind = .open_asterisk;
+                    res.end = index;
+                    break;
+                },
+                '_' => {
+                    res.kind = .open_underscore;
+                    res.end = index;
+                    break;
+                },
+                else => break,
+            },
+            .asterisk => switch (c) {
+                '}' => {
+                    res.kind = .close_asterisk;
+                    res.end = index;
+                    break;
+                },
+                else => break,
+            },
+            .underscore => switch (c) {
+                '}' => {
+                    res.kind = .close_underscore;
+                    res.end = index;
+                    break;
+                },
+                else => break,
             },
         }
     }

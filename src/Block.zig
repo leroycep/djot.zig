@@ -282,10 +282,11 @@ fn parseTextSpans(parent_events: *djot.EventCursor, parent_tokens: *djot.TokCurs
         var lookahead = tokens;
         var lookahead_events = events;
 
-        if (lookahead.expect(.line_break)) |_| {
+        if (lookahead.expect(.line_break)) |line_break| {
             if (prefix) |p| {
                 if (!p.parsePrefix(&lookahead)) break;
             }
+            _ = try lookahead_events.append(.{ .text = lookahead.startOf(line_break) });
         }
 
         _ = try parseTextSpan(&lookahead_events, &lookahead, prefix, opener) orelse break;
@@ -326,6 +327,22 @@ fn parseTextSpan(parent_events: *djot.EventCursor, parent_tokens: *djot.TokCurso
         => {
             _ = tokens.next();
             _ = try events.append(.{ .text = token.start });
+        },
+
+        .open_asterisk, .open_underscore => (try parseInlineFormatting(&events, &tokens, prefix, opener)) orelse {
+            const plain = parseTextPlain(&tokens) orelse return null;
+            _ = try events.append(plain);
+        },
+
+        .close_asterisk, .close_underscore => {
+            if (opener) |o| {
+                if (o.isEnd(tokens, tokens.index)) {
+                    return null;
+                }
+            }
+
+            const plain = parseTextPlain(&tokens) orelse return null;
+            _ = try events.append(plain);
         },
 
         .asterisk, .underscore => {
@@ -370,37 +387,58 @@ fn parseInlineFormatting(parent_events: *djot.EventCursor, parent_tokens: *djot.
     var events = parent_events.*;
     var tokens = parent_tokens.*;
 
-    const open = tokens.expectInList(&.{ .asterisk, .underscore }) orelse return null;
+    const ASTERISK_OPEN = [_]Token.Kind{ .asterisk, .open_asterisk };
+    const ASTERISK_CLOSE = [_]Token.Kind{ .asterisk, .close_asterisk };
+    const UNDERSCORE_OPEN = [_]Token.Kind{ .underscore, .open_underscore };
+    const UNDERSCORE_CLOSE = [_]Token.Kind{ .underscore, .close_underscore };
+
+    const open = tokens.expectInList(&(ASTERISK_OPEN ++ UNDERSCORE_OPEN)) orelse return null;
+
     switch (tokens.kindOf(open)) {
-        .asterisk => _ = try events.append(.start_strong),
-        .underscore => _ = try events.append(.start_emphasis),
-        else => unreachable,
+        .asterisk, .underscore => if (tokens.expect(.space)) |_| {
+            return null;
+        },
+        else => {},
     }
+
+    const openers = switch (tokens.kindOf(open)) {
+        .asterisk, .open_asterisk => &ASTERISK_OPEN,
+        .underscore, .open_underscore => &UNDERSCORE_OPEN,
+        else => unreachable,
+    };
+    const opener_event: djot.Event = switch (tokens.kindOf(open)) {
+        .asterisk, .open_asterisk => .start_strong,
+        .underscore, .open_underscore => .start_emphasis,
+        else => unreachable,
+    };
+
+    _ = try events.append(opener_event);
+
     var num_open_tokens: u32 = 1;
-    while (tokens.expect(tokens.kindOf(open))) |_| : (num_open_tokens += 1) {
-        switch (tokens.kindOf(open)) {
-            .asterisk => _ = try events.append(.start_strong),
-            .underscore => _ = try events.append(.start_emphasis),
-            else => unreachable,
-        }
+    while (tokens.expectInList(openers)) |_| : (num_open_tokens += 1) {
+        _ = try events.append(opener_event);
     }
 
     _ = (try parseTextSpans(&events, &tokens, prefix, &.{ .prev = prev_opener, .tok = tokens.tokOf(open) })) orelse return null;
 
-    _ = tokens.expect(tokens.kindOf(open)) orelse return null;
-    switch (tokens.kindOf(open)) {
-        .asterisk => _ = try events.append(.close_strong),
-        .underscore => _ = try events.append(.close_emphasis),
+    const closers = switch (tokens.kindOf(open)) {
+        .asterisk, .open_asterisk => &ASTERISK_CLOSE,
+        .underscore, .open_underscore => &UNDERSCORE_CLOSE,
         else => unreachable,
-    }
+    };
+    const close_event: djot.Event = switch (tokens.kindOf(open)) {
+        .asterisk, .open_asterisk => .close_strong,
+        .underscore, .open_underscore => .close_emphasis,
+        else => unreachable,
+    };
+
+    _ = tokens.expectInList(closers) orelse return null;
+    _ = try events.append(close_event);
+
     var num_close_tokens: u32 = 1;
-    while (tokens.expect(tokens.kindOf(open))) |_| : (num_close_tokens += 1) {
+    while (tokens.expectInList(closers)) |_| : (num_close_tokens += 1) {
         if (num_close_tokens >= num_open_tokens) break;
-        switch (tokens.kindOf(open)) {
-            .asterisk => _ = try events.append(.close_strong),
-            .underscore => _ = try events.append(.close_emphasis),
-            else => unreachable,
-        }
+        _ = try events.append(close_event);
     }
 
     parent_tokens.* = tokens;
@@ -460,6 +498,10 @@ fn parseTextSpanPlain(parent_events: *djot.EventCursor, parent_tokens: *djot.Tok
             .asterisk,
             .underscore,
             .marker,
+            .open_asterisk,
+            .close_asterisk,
+            .open_underscore,
+            .close_underscore,
             => {
                 // Treat as text
                 _ = try events.append(.{ .text = token.start });
@@ -524,6 +566,10 @@ fn parseTextPlain(parent_tokens: *djot.TokCursor) ?djot.Event {
         .asterisk,
         .underscore,
         .ticks,
+        .open_asterisk,
+        .close_asterisk,
+        .open_underscore,
+        .close_underscore,
         => {
             // Treat as text
             parent_tokens.* = tokens;
@@ -578,11 +624,23 @@ const PrevOpener = struct {
     pub fn isEnd(this: @This(), tokens: djot.TokCursor, index: djot.TokCursor.Index) bool {
         switch (tokens.kindOf(index)) {
             .asterisk,
-            .underscore,
-            => |kind| {
-                return this.tok.kind == kind;
+            .close_asterisk,
+            => if (this.tok.kind.isAsterisk()) {
+                return true;
             },
+
+            .underscore,
+            .close_underscore,
+            => if (this.tok.kind.isUnderscore()) {
+                return true;
+            },
+
             else => return false,
+        }
+        if (this.prev) |prev| {
+            return prev.isEnd(tokens, index);
+        } else {
+            return false;
         }
     }
 };
