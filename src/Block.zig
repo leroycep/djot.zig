@@ -392,11 +392,11 @@ fn parseInlineLink(parent_events: *djot.EventCursor, parent_tokens: *djot.TokCur
     var events = parent_events.*;
     var tokens = parent_tokens.*;
 
-    _ = tokens.expect(.left_square) orelse return null;
+    const open_link_token = tokens.expect(.left_square) orelse return null;
 
     const start_event = try events.append(.{ .start_link = undefined });
 
-    _ = (try parseTextSpans(&events, &tokens, prefix, &.{ .prev = prev_opener, .tok = tokens.tokOf(start_event) })) orelse return null;
+    _ = (try parseTextSpans(&events, &tokens, prefix, &.{ .prev = prev_opener, .tok = tokens.tokOf(open_link_token) })) orelse return null;
 
     switch (tokens.kindOf(tokens.index)) {
         .inline_link_url => {
