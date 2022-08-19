@@ -242,6 +242,8 @@ test "events loose list" {
 const TestEvent = union(djot.Event.Kind) {
     text: []const u8,
     escaped: []const u8,
+    autolink: []const u8,
+    autolink_email: []const u8,
 
     start_paragraph,
     close_paragraph,
@@ -267,6 +269,9 @@ const TestEvent = union(djot.Event.Kind) {
     start_emphasis,
     close_emphasis,
 
+    start_link: []const u8,
+    close_link: []const u8,
+
     pub fn format(
         this: @This(),
         comptime fmt: []const u8,
@@ -281,6 +286,10 @@ const TestEvent = union(djot.Event.Kind) {
             .escaped,
             .start_list_item,
             .close_list_item,
+            .autolink,
+            .autolink_email,
+            .start_link,
+            .close_link,
             => |text| try writer.print(" \"{}\"", .{std.zig.fmtEscapes(text)}),
 
             .start_heading,

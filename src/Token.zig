@@ -16,18 +16,26 @@ pub const Kind = enum(u8) {
     escape,
     heading,
     right_angle,
+    left_square,
+    right_square,
 
     marker,
 
     ticks,
+
     asterisk,
     open_asterisk,
     close_asterisk,
     space_asterisk,
+
     underscore,
     open_underscore,
     close_underscore,
     space_underscore,
+
+    autolink,
+    autolink_email,
+    inline_link_url,
 
     pub fn isAsterisk(this: @This()) bool {
         switch (this) {
@@ -103,6 +111,13 @@ pub fn parse(source: []const u8, start: usize) @This() {
         asterisk,
         underscore,
         space,
+
+        autolink,
+        autolink_email,
+
+        rsquare,
+        rsquare_lparen,
+        rsquare_lparen_url,
     };
 
     var res = @This(){
@@ -133,6 +148,11 @@ pub fn parse(source: []const u8, start: usize) @This() {
                     res.end = index;
                     break;
                 },
+                '<' => {
+                    res.kind = .text;
+                    res.end = index;
+                    state = .autolink;
+                },
                 '>' => {
                     res.kind = .right_angle;
                     res.end = index;
@@ -152,6 +172,16 @@ pub fn parse(source: []const u8, start: usize) @This() {
                     res.kind = .text;
                     res.end = index;
                     state = .lcurl;
+                },
+                '[' => {
+                    res.kind = .left_square;
+                    res.end = index;
+                    state = .rsquare;
+                },
+                ']' => {
+                    res.kind = .right_square;
+                    res.end = index;
+                    state = .rsquare;
                 },
                 '-',
                 '+',
@@ -211,6 +241,8 @@ pub fn parse(source: []const u8, start: usize) @This() {
                 '_',
                 '{',
                 '\\',
+                '[',
+                ']',
                 => break,
 
                 ' ' => state = .text_space,
@@ -229,6 +261,8 @@ pub fn parse(source: []const u8, start: usize) @This() {
                 '_',
                 '{',
                 '\\',
+                '[',
+                ']',
                 => break,
 
                 ' ' => state = .text_space,
@@ -246,6 +280,8 @@ pub fn parse(source: []const u8, start: usize) @This() {
                 '{',
                 '\n',
                 '\\',
+                '[',
+                ']',
                 => break,
 
                 else => {
@@ -299,6 +335,8 @@ pub fn parse(source: []const u8, start: usize) @This() {
 
                 '_',
                 '\n',
+                '[',
+                ']',
                 => break,
 
                 else => {
@@ -326,6 +364,8 @@ pub fn parse(source: []const u8, start: usize) @This() {
                 '{',
                 '\\',
                 '\n',
+                '[',
+                ']',
                 => break,
 
                 else => {
@@ -353,6 +393,8 @@ pub fn parse(source: []const u8, start: usize) @This() {
                 '{',
                 '\\',
                 '\n',
+                '[',
+                ']',
                 => break,
 
                 else => {
@@ -376,6 +418,8 @@ pub fn parse(source: []const u8, start: usize) @This() {
                 '{',
                 '\\',
                 '\n',
+                '[',
+                ']',
                 => break,
 
                 else => {
@@ -399,6 +443,8 @@ pub fn parse(source: []const u8, start: usize) @This() {
                 '{',
                 '\\',
                 '\n',
+                '[',
+                ']',
                 => break,
 
                 else => {
@@ -447,6 +493,41 @@ pub fn parse(source: []const u8, start: usize) @This() {
                     break;
                 },
                 else => break,
+            },
+            .autolink => switch (c) {
+                '>' => {
+                    res.kind = .autolink;
+                    res.end = index;
+                    break;
+                },
+                '@' => state = .autolink_email,
+                '\n' => break,
+                else => res.end = index,
+            },
+            .autolink_email => switch (c) {
+                '>' => {
+                    res.kind = .autolink_email;
+                    res.end = index;
+                    break;
+                },
+                '\n' => break,
+                else => res.end = index,
+            },
+            .rsquare => switch (c) {
+                '(' => state = .rsquare_lparen,
+                else => break,
+            },
+            .rsquare_lparen => switch (c) {
+                'A'...'Z', 'a'...'z' => state = .rsquare_lparen_url,
+                else => break,
+            },
+            .rsquare_lparen_url => switch (c) {
+                ')' => {
+                    res.kind = .inline_link_url;
+                    res.end = index;
+                    break;
+                },
+                else => {},
             },
         }
     }

@@ -41,6 +41,28 @@ pub fn toHtml(allocator: std.mem.Allocator, source: []const u8) ![]const u8 {
                 }
             },
 
+            .autolink => {
+                const url = doc.asText(event_index);
+                try html.writer().print("<a href=\"{}\">{s}</a>", .{ std.zig.fmtEscapes(url), url });
+            },
+            .autolink_email => {
+                const email = doc.asText(event_index);
+                try html.writer().print("<a href=\"mailto:{}\">{s}</a>", .{ std.zig.fmtEscapes(email), email });
+            },
+
+            .start_link => {
+                // Remove newlines from the url
+                const url = doc.asText(event_index);
+                var lines = std.mem.split(u8, url, "\n");
+
+                try html.writer().writeAll("<a href=\"");
+                while (lines.next()) |line| {
+                    try html.writer().writeAll(line);
+                }
+                try html.writer().writeAll("\">");
+            },
+            .close_link => try html.writer().writeAll("</a>"),
+
             .start_paragraph => try html.appendSlice("<p>"),
             .close_paragraph => try html.appendSlice("</p>\n"),
 
@@ -94,6 +116,8 @@ pub const Document = struct {
 pub const Event = union(Kind) {
     text: SourceIndex,
     escaped: SourceIndex,
+    autolink: SourceIndex,
+    autolink_email: SourceIndex,
 
     start_paragraph,
     close_paragraph,
@@ -120,6 +144,9 @@ pub const Event = union(Kind) {
     start_emphasis,
     close_emphasis,
 
+    start_link: SourceIndex,
+    close_link: SourceIndex,
+
     pub const List = struct {
         style: Marker.Style,
     };
@@ -129,6 +156,8 @@ pub const Event = union(Kind) {
     pub const Kind = enum {
         text,
         escaped,
+        autolink,
+        autolink_email,
 
         start_paragraph,
         close_paragraph,
@@ -153,6 +182,9 @@ pub const Event = union(Kind) {
 
         start_emphasis,
         close_emphasis,
+
+        start_link,
+        close_link,
     };
 
     /// Only valid for events with a SourceIndex payload
@@ -163,6 +195,16 @@ pub const Event = union(Kind) {
                 return source[token.start..token.end];
             },
 
+            .autolink, .autolink_email => |source_index| {
+                const token = Token.parse(source, source_index);
+                return source[token.start + 1 .. token.end - 1];
+            },
+
+            .escaped => |source_index| {
+                const token = Token.parse(source, source_index);
+                return source[token.start + 1 .. token.end];
+            },
+
             .start_list_item,
             .close_list_item,
             => |source_index| {
@@ -171,10 +213,13 @@ pub const Event = union(Kind) {
                 return source[marker.start..marker.end];
             },
 
-            .escaped => |source_index| {
+            .start_link,
+            .close_link,
+            => |source_index| {
                 const token = Token.parse(source, source_index);
-                return source[token.start + 1 .. token.end];
+                return source[token.start + 2 .. token.end - 1];
             },
+
             else => std.debug.panic("Event {s} does not have associated text", .{std.meta.tagName(this)}),
         }
     }
@@ -199,8 +244,12 @@ pub const Event = union(Kind) {
             switch (this.event) {
                 .text,
                 .escaped,
+                .autolink,
+                .autolink_email,
                 .start_list_item,
                 .close_list_item,
+                .start_link,
+                .close_link,
                 => |_| try writer.print(" \"{}\"", .{std.zig.fmtEscapes(this.event.asText(this.source))}),
 
                 .start_heading,

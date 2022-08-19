@@ -320,6 +320,7 @@ fn parseTextSpan(parent_events: *djot.EventCursor, parent_tokens: *djot.TokCurso
 
         .text,
         .right_angle,
+        .right_square,
         .heading,
         .nonbreaking_space,
         .marker,
@@ -327,6 +328,13 @@ fn parseTextSpan(parent_events: *djot.EventCursor, parent_tokens: *djot.TokCurso
         => {
             _ = try events.append(.{ .text = token.start });
             tokens.index += 1;
+        },
+
+        .left_square => {
+            try parseInlineLink(&events, &tokens, prefix, opener) orelse {
+                _ = try events.append(.{ .text = token.start });
+                tokens.index += 1;
+            };
         },
 
         .open_asterisk,
@@ -338,7 +346,10 @@ fn parseTextSpan(parent_events: *djot.EventCursor, parent_tokens: *djot.TokCurso
             tokens.index += 1;
         },
 
-        .close_asterisk, .close_underscore => {
+        .close_asterisk,
+        .close_underscore,
+        .inline_link_url,
+        => {
             if (opener) |o| {
                 if (o.isEnd(tokens, tokens.index)) {
                     return null;
@@ -362,23 +373,40 @@ fn parseTextSpan(parent_events: *djot.EventCursor, parent_tokens: *djot.TokCurso
             };
         },
         .ticks => (try parseTextSpanVerbatim(&events, &tokens, prefix)).?,
+
+        .autolink => {
+            _ = try events.append(.{ .autolink = token.start });
+            tokens.index += 1;
+        },
+        .autolink_email => {
+            _ = try events.append(.{ .autolink_email = token.start });
+            tokens.index += 1;
+        },
     }
 
     parent_tokens.* = tokens;
     parent_events.* = events;
 }
 
-fn parseTextSpanEmphasis(parent_events: *djot.EventCursor, parent_tokens: *djot.TokCursor, prefix: ?*const Prefix, prev_opener: ?*const PrevOpener) djot.Error!?void {
+fn parseInlineLink(parent_events: *djot.EventCursor, parent_tokens: *djot.TokCursor, prefix: ?*const Prefix, prev_opener: ?*const PrevOpener) djot.Error!?void {
     var events = parent_events.*;
     var tokens = parent_tokens.*;
 
-    const underscore_open = tokens.expect(.underscore) orelse return null;
-    _ = try events.append(.start_emphasis);
+    _ = tokens.expect(.left_square) orelse return null;
 
-    _ = (try parseTextSpans(&events, &tokens, prefix, &.{ .prev = prev_opener, .tok = tokens.tokOf(underscore_open) })) orelse return null;
+    const start_event = try events.append(.{ .start_link = undefined });
 
-    _ = tokens.expect(.underscore) orelse return null;
-    _ = try events.append(.close_emphasis);
+    _ = (try parseTextSpans(&events, &tokens, prefix, &.{ .prev = prev_opener, .tok = tokens.tokOf(start_event) })) orelse return null;
+
+    switch (tokens.kindOf(tokens.index)) {
+        .inline_link_url => {
+            events.set(start_event, .{ .start_link = tokens.startOf(tokens.index) });
+            _ = try events.append(.{ .close_link = tokens.startOf(tokens.index) });
+            tokens.index += 1;
+        },
+
+        else => return null,
+    }
 
     parent_tokens.* = tokens;
     parent_events.* = events;
@@ -477,6 +505,8 @@ fn parseTextSpanVerbatim(parent_events: *djot.EventCursor, parent_tokens: *djot.
             .text,
             .space,
             .right_angle,
+            .left_square,
+            .right_square,
             .heading,
             .nonbreaking_space,
             .marker,
@@ -492,6 +522,10 @@ fn parseTextSpanVerbatim(parent_events: *djot.EventCursor, parent_tokens: *djot.
             .open_underscore,
             .close_underscore,
             .space_underscore,
+
+            .autolink,
+            .autolink_email,
+            .inline_link_url,
             => {
                 _ = try events.append(.{ .text = tokens.startOf(tokens.index) });
                 tokens.index += 1;
@@ -574,7 +608,11 @@ const PrevOpener = struct {
                 return true;
             },
 
-            else => return false,
+            .inline_link_url => if (this.tok.kind == .left_square) {
+                return true;
+            },
+
+            else => {},
         }
         if (this.prev) |prev| {
             return prev.isEnd(tokens, index);
