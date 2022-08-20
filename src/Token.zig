@@ -263,6 +263,7 @@ pub fn parse(source: []const u8, start: usize) @This() {
                 '-',
                 '+',
                 '*',
+                '<',
                 '>',
                 '`',
                 '_',
@@ -288,6 +289,7 @@ pub fn parse(source: []const u8, start: usize) @This() {
                 '{',
                 '\n',
                 '\\',
+                '<',
                 '!',
                 '[',
                 ']',
@@ -347,6 +349,7 @@ pub fn parse(source: []const u8, start: usize) @This() {
                 '!',
                 '[',
                 ']',
+                '<',
                 => break,
 
                 else => {
@@ -377,6 +380,7 @@ pub fn parse(source: []const u8, start: usize) @This() {
                 '!',
                 '[',
                 ']',
+                '<',
                 => break,
 
                 else => {
@@ -407,6 +411,7 @@ pub fn parse(source: []const u8, start: usize) @This() {
                 '!',
                 '[',
                 ']',
+                '<',
                 => break,
 
                 else => {
@@ -433,6 +438,7 @@ pub fn parse(source: []const u8, start: usize) @This() {
                 '!',
                 '[',
                 ']',
+                '<',
                 => break,
 
                 else => {
@@ -459,6 +465,7 @@ pub fn parse(source: []const u8, start: usize) @This() {
                 '!',
                 '[',
                 ']',
+                '<',
                 => break,
 
                 else => {
