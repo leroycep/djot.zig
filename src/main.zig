@@ -43,7 +43,7 @@ pub fn main() anyerror!void {
             var pos: usize = 0;
             while (true) : (index += 1) {
                 const token = djot.Token.parse(source, pos);
-                try out.print("token[{}] = {} \"{}\"\n", .{ index, std.meta.tagName(token.kind), std.zig.fmtEscapes(source[token.start..token.end]) });
+                try out.print("token[{}] = {s} \"{}\"\n", .{ index, std.meta.tagName(token.kind), std.zig.fmtEscapes(source[token.start..token.end]) });
                 if (token.kind == .eof) {
                     break;
                 }
