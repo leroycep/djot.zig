@@ -28,10 +28,10 @@ Test results as of 2022-08-19:
 
 ```
 $ zig build -fno-stage1 test
-66 passed; 0 skipped; 169 failed.
+70 passed; 0 skipped; 165 failed.
 ```
 
-That's 66/235 test cases passing; or about 28% of the tests passing.
+That's 70/235 test cases passing; or about 29% of the tests passing.
 
 ### Inline Syntax
 
@@ -65,7 +65,7 @@ That's 66/235 test cases passing; or about 28% of the tests passing.
 | block quotes | yes |
 | lists | partially |
 | code blocks | no |
-| thematic breaks | no |
+| thematic breaks | yes|
 | raw blocks | no |
 | div blocks | no |
 | pipe tables | no |

@@ -29,7 +29,6 @@ Not started:
 - spans
 - inline attributes
 - code blocks
-- thematic breaks
 - raw blocks
 - div blocks
 - pipe tables
@@ -50,4 +49,5 @@ Not started:
 - inline emphasis/strong
 - paragraph blocks
 - quote blocks
+- thematic breaks
 
