@@ -106,6 +106,8 @@ pub fn parse(source: []const u8, start: usize) @This() {
     const State = enum {
         default,
         text,
+        text_period1,
+        text_period2,
         text_newline,
         text_space,
 
@@ -281,10 +283,42 @@ pub fn parse(source: []const u8, start: usize) @This() {
                 ']',
                 => break,
 
+                '.' => state = .text_period1,
                 ' ' => state = .text_space,
-
                 '\n' => state = .text_newline,
                 else => res.end = index,
+            },
+            .text_period1 => switch (c) {
+                '.' => state = .text_period2,
+                '`', '*', '_', '{', '\\', '!', '[', ']' => break,
+
+                ' ' => {
+                    res.end = index;
+                    state = .text_space;
+                },
+                '\n' => {
+                    res.end = index - 1;
+                    state = .text_newline;
+                },
+                else => {
+                    res.end = index;
+                    state = .text;
+                },
+            },
+            .text_period2 => switch (c) {
+                '.' => break,
+
+                '`', '*', '_', '{', '\\', '!', '[', ']' => break,
+
+                ' ' => state = .text_space,
+                '\n' => {
+                    res.end = index - 1;
+                    state = .text_newline;
+                },
+                else => {
+                    res.end = index;
+                    state = .text;
+                },
             },
             .text_newline => switch (c) {
                 '\n',
@@ -492,6 +526,13 @@ pub fn parse(source: []const u8, start: usize) @This() {
                 },
                 else => {},
             },
+        }
+    }
+
+    if (index == source.len) {
+        switch (state) {
+            .text_period1 => res.end = index,
+            else => {},
         }
     }
 
