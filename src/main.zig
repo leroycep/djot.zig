@@ -1,9 +1,17 @@
 const std = @import("std");
+const djot = @import("./djot.zig");
 
 pub fn main() anyerror!void {
-    // Note that info level log messages are by default printed only in Debug
-    // and ReleaseSafe build modes.
-    std.log.info("All your codebase are belong to us.", .{});
+    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    defer _ = gpa.deinit();
+
+    const stdin = std.io.getStdIn();
+    const stdout = std.io.getStdOut();
+
+    const source = try stdin.readToEndAlloc(gpa.allocator(), 500 * 1024 * 1024);
+    defer gpa.allocator().free(source);
+
+    try djot.toHtml(gpa.allocator(), source, stdout.writer());
 }
 
 comptime {

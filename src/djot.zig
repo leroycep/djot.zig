@@ -9,15 +9,12 @@ const RIGHT_DOUBLE_QUOTE = '”';
 const LEFT_SINGLE_QUOTE = '‘';
 const RIGHT_SINGLE_QUOTE = '’';
 
-// TODO: Use concrete error set
-pub fn toHtml(allocator: std.mem.Allocator, source: []const u8) ![]const u8 {
+pub fn toHtml(allocator: std.mem.Allocator, source: []const u8, html_writer: anytype) !void {
     var doc = try parse(allocator, source);
     defer doc.deinit(allocator);
 
     var in_alt_text: u32 = 0;
 
-    var html = std.ArrayList(u8).init(allocator);
-    defer html.deinit();
     for (doc.events.items(.tag)) |event_kind, event_index| {
         switch (event_kind) {
             .text,
@@ -30,14 +27,14 @@ pub fn toHtml(allocator: std.mem.Allocator, source: []const u8) ![]const u8 {
                     // TODO: check this earlier?
                     if (i + codepoint_length > t.len) return error.InvalidUTF8;
                     switch (try std.unicode.utf8Decode(t[i..][0..codepoint_length])) {
-                        '…' => try html.appendSlice("&hellip;"),
-                        '–' => try html.appendSlice("&ndash;"),
-                        '—' => try html.appendSlice("&mdash;"),
-                        LEFT_DOUBLE_QUOTE => try html.appendSlice("&ldquo;"),
-                        RIGHT_DOUBLE_QUOTE => try html.appendSlice("&rdquo;"),
-                        LEFT_SINGLE_QUOTE => try html.appendSlice("&lsquo;"),
-                        RIGHT_SINGLE_QUOTE => try html.appendSlice("&rsquo;"),
-                        else => try html.appendSlice(t[i..][0..codepoint_length]),
+                        '…' => try html_writer.writeAll("&hellip;"),
+                        '–' => try html_writer.writeAll("&ndash;"),
+                        '—' => try html_writer.writeAll("&mdash;"),
+                        LEFT_DOUBLE_QUOTE => try html_writer.writeAll("&ldquo;"),
+                        RIGHT_DOUBLE_QUOTE => try html_writer.writeAll("&rdquo;"),
+                        LEFT_SINGLE_QUOTE => try html_writer.writeAll("&lsquo;"),
+                        RIGHT_SINGLE_QUOTE => try html_writer.writeAll("&rsquo;"),
+                        else => try html_writer.writeAll(t[i..][0..codepoint_length]),
                     }
                     i += codepoint_length;
                 }
@@ -45,11 +42,11 @@ pub fn toHtml(allocator: std.mem.Allocator, source: []const u8) ![]const u8 {
 
             .autolink => {
                 const url = doc.asText(event_index);
-                try html.writer().print("<a href=\"{}\">{s}</a>", .{ std.zig.fmtEscapes(url), url });
+                try html_writer.print("<a href=\"{}\">{s}</a>", .{ std.zig.fmtEscapes(url), url });
             },
             .autolink_email => {
                 const email = doc.asText(event_index);
-                try html.writer().print("<a href=\"mailto:{}\">{s}</a>", .{ std.zig.fmtEscapes(email), email });
+                try html_writer.print("<a href=\"mailto:{}\">{s}</a>", .{ std.zig.fmtEscapes(email), email });
             },
 
             .start_link => if (in_alt_text < 1) {
@@ -57,18 +54,18 @@ pub fn toHtml(allocator: std.mem.Allocator, source: []const u8) ![]const u8 {
                 const url = doc.asText(event_index);
                 var lines = std.mem.split(u8, url, "\n");
 
-                try html.writer().writeAll("<a href=\"");
+                try html_writer.writeAll("<a href=\"");
                 while (lines.next()) |line| {
-                    try html.writer().writeAll(line);
+                    try html_writer.writeAll(line);
                 }
-                try html.writer().writeAll("\">");
+                try html_writer.writeAll("\">");
             },
             .close_link => if (in_alt_text < 1) {
-                try html.writer().writeAll("</a>");
+                try html_writer.writeAll("</a>");
             },
 
             .start_image_link => {
-                try html.writer().writeAll("<img alt=\"");
+                try html_writer.writeAll("<img alt=\"");
                 in_alt_text += 1;
             },
             .close_image_link => {
@@ -76,41 +73,39 @@ pub fn toHtml(allocator: std.mem.Allocator, source: []const u8) ![]const u8 {
                 const url = doc.asText(event_index);
                 var lines = std.mem.split(u8, url, "\n");
 
-                try html.writer().writeAll("\" src=\"");
+                try html_writer.writeAll("\" src=\"");
                 while (lines.next()) |line| {
-                    try html.writer().writeAll(line);
+                    try html_writer.writeAll(line);
                 }
-                try html.writer().writeAll("\">");
+                try html_writer.writeAll("\">");
                 in_alt_text -= 1;
             },
 
-            .start_paragraph => try html.appendSlice("<p>"),
-            .close_paragraph => try html.appendSlice("</p>\n"),
+            .start_paragraph => try html_writer.writeAll("<p>"),
+            .close_paragraph => try html_writer.writeAll("</p>\n"),
 
-            .start_heading => try html.writer().print("<h{}>", .{doc.events.items(.data)[event_index].start_heading}),
-            .close_heading => try html.writer().print("</h{}>", .{doc.events.items(.data)[event_index].close_heading}),
+            .start_heading => try html_writer.print("<h{}>", .{doc.events.items(.data)[event_index].start_heading}),
+            .close_heading => try html_writer.print("</h{}>", .{doc.events.items(.data)[event_index].close_heading}),
 
-            .start_list => try html.appendSlice("<ul>"),
-            .close_list => try html.appendSlice("</ul>"),
+            .start_list => try html_writer.writeAll("<ul>"),
+            .close_list => try html_writer.writeAll("</ul>"),
 
-            .start_list_item => try html.appendSlice("<li>"),
-            .close_list_item => try html.appendSlice("</li>"),
+            .start_list_item => try html_writer.writeAll("<li>"),
+            .close_list_item => try html_writer.writeAll("</li>"),
 
-            .start_quote => try html.appendSlice("<quote>"),
-            .close_quote => try html.appendSlice("</quote>"),
+            .start_quote => try html_writer.writeAll("<quote>"),
+            .close_quote => try html_writer.writeAll("</quote>"),
 
-            .start_verbatim => try html.appendSlice("<code>"),
-            .close_verbatim => try html.appendSlice("</code>"),
+            .start_verbatim => try html_writer.writeAll("<code>"),
+            .close_verbatim => try html_writer.writeAll("</code>"),
 
-            .start_strong => try html.appendSlice("<strong>"),
-            .close_strong => try html.appendSlice("</strong>"),
+            .start_strong => try html_writer.writeAll("<strong>"),
+            .close_strong => try html_writer.writeAll("</strong>"),
 
-            .start_emphasis => try html.appendSlice("<em>"),
-            .close_emphasis => try html.appendSlice("</em>"),
+            .start_emphasis => try html_writer.writeAll("<em>"),
+            .close_emphasis => try html_writer.writeAll("</em>"),
         }
     }
-
-    return html.toOwnedSlice();
 }
 
 pub const Document = struct {
@@ -326,7 +321,7 @@ pub fn parse(allocator: std.mem.Allocator, source: []const u8) Error!Document {
         .index = 0,
     };
 
-    if (true) {
+    if (false) {
         std.debug.print("{s}:{}\n", .{ @src().fn_name, @src().line });
         for (tokens.items(.kind)) |tag, i| {
             std.debug.print("token[{}] = {} \"{}\"\n", .{ i, tag, std.zig.fmtEscapes(tok_cursor.text(@intCast(u32, i))) });
@@ -337,7 +332,7 @@ pub fn parse(allocator: std.mem.Allocator, source: []const u8) Error!Document {
 
     events.len = event_cursor.index;
 
-    if (true) {
+    if (false) {
         std.debug.print("{s}:{}\n", .{ @src().fn_name, @src().line });
         for (events.items(.tag)) |_, i| {
             std.debug.print("event[{}] = {}\n", .{ i, events.get(i).toUnion().fmtWithSource(source) });
