@@ -65,6 +65,10 @@ pub fn parseBlock(parent_events: *djot.EventCursor, parent_tokens: *djot.TokCurs
             break :blk;
         }
 
+        if (try parseCodeBlock(&events, &tokens, prefix)) |_| {
+            break :blk;
+        }
+
         if (try parseQuote(&events, &tokens, prefix)) |_| {
             break :blk;
         }
@@ -110,6 +114,76 @@ pub fn parseNewlinePrefix(parent_tokens: *djot.TokCursor, prefix: ?*const Prefix
 
     parent_tokens.* = tokens;
     return was_newline;
+}
+
+pub fn parseCodeBlock(parent_events: *djot.EventCursor, parent_tokens: *djot.TokCursor, prefix: ?*const Prefix) djot.Error!?void {
+    var tokens = parent_tokens.*;
+    var events = parent_events.*;
+
+    const fence = tokens.expect(.ticks) orelse return null;
+    const fence_token = tokens.token(fence);
+    const num_start_ticks = fence_token.end - fence_token.start;
+
+    while (tokens.expect(.space)) |_| {}
+    const language_or_null = tokens.expect(.text);
+    while (tokens.expect(.space)) |_| {}
+    _ = tokens.expect(.line_break) orelse return null;
+
+    if (language_or_null) |language| {
+        // TODO: See if we can make the tokenizer checking for spaces
+        const text = tokens.token(language);
+        if (std.mem.indexOfAny(u8, tokens.source[text.start..text.end], " ") != null) return null;
+
+        // TODO: attach language info; check if it is a raw block
+        _ = language;
+
+        _ = try events.append(.start_code_block);
+    } else {
+        _ = try events.append(.start_code_block);
+    }
+
+    var was_newline = true;
+    while (tokens.current()) |tok| : (tokens.index += 1) {
+        switch (tok.kind) {
+            .eof => break,
+            .ticks => if (was_newline) {
+                // Check if the number of ticks is >= the starting fence
+                const token = tokens.token(fence);
+                const num_these_ticks = token.end - token.start;
+                if (num_these_ticks >= num_start_ticks) {
+                    tokens.index += 1;
+                    break;
+                }
+
+                // Otherwise append it as text
+                _ = try events.append(.{ .text = tok.start });
+                was_newline = false;
+            },
+
+            .line_break => {
+                was_newline = true;
+                _ = try events.append(.{ .text = tok.start });
+                // TODO: handle prefixes
+                _ = prefix;
+            },
+
+            else => {
+                _ = try events.append(.{ .text = tok.start });
+                was_newline = false;
+            },
+        }
+    }
+
+    if (language_or_null) |language| {
+        // TODO: attach language info; check if it is a raw block
+        _ = language;
+        _ = try events.append(.close_code_block);
+    } else {
+        _ = try events.append(.close_code_block);
+    }
+
+    parent_tokens.* = tokens;
+    parent_events.* = events;
 }
 
 pub fn parseThematicBreak(parent_events: *djot.EventCursor, parent_tokens: *djot.TokCursor) djot.Error!?void {

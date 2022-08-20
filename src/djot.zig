@@ -106,6 +106,9 @@ pub fn toHtml(allocator: std.mem.Allocator, source: []const u8, html_writer: any
             .close_emphasis => try html_writer.writeAll("</em>"),
 
             .thematic_break => try html_writer.writeAll("<hr>\n"),
+
+            .start_code_block => try html_writer.writeAll("<pre><code>"),
+            .close_code_block => try html_writer.writeAll("</code></pre>\n"),
         }
     }
 }
@@ -216,6 +219,8 @@ pub const Document = struct {
                 .start_emphasis,
                 .close_emphasis,
                 .thematic_break,
+                .start_code_block,
+                .close_code_block,
                 => {},
             }
         }
@@ -261,6 +266,9 @@ pub const Event = union(Kind) {
 
     thematic_break,
 
+    start_code_block,
+    close_code_block,
+
     pub const List = struct {
         style: Marker.Style,
     };
@@ -304,6 +312,9 @@ pub const Event = union(Kind) {
         close_image_link,
 
         thematic_break,
+
+        start_code_block,
+        close_code_block,
     };
 };
 
