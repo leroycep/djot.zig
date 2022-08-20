@@ -110,6 +110,7 @@ pub fn parse(source: []const u8, start: usize) @This() {
         text_period2,
         text_newline,
         text_space,
+        text_hyphen,
 
         heading,
         escape,
@@ -284,6 +285,7 @@ pub fn parse(source: []const u8, start: usize) @This() {
                 => break,
 
                 '.' => state = .text_period1,
+                '-' => state = .text_hyphen,
                 ' ' => state = .text_space,
                 '\n' => state = .text_newline,
                 else => res.end = index,
@@ -354,20 +356,37 @@ pub fn parse(source: []const u8, start: usize) @This() {
                 '*',
                 '_',
                 '{',
-                '\n',
                 '\\',
                 '<',
                 '!',
                 '[',
                 ']',
-                '.',
                 ')',
                 => break,
 
                 ' ' => {},
 
+                '.' => state = .text_period1,
+                '-' => state = .text_hyphen,
+                '\n' => state = .text_newline,
+
                 else => {
                     res.kind = .text;
+                    res.end = index;
+                    state = .text;
+                },
+            },
+            .text_hyphen => switch (c) {
+                '-' => break,
+
+                '`', '*', '_', '{', '\\', '!', '[', ']' => break,
+
+                ' ' => state = .text_space,
+                '\n' => {
+                    res.end = index - 1;
+                    state = .text_newline;
+                },
+                else => {
                     res.end = index;
                     state = .text;
                 },
@@ -531,7 +550,7 @@ pub fn parse(source: []const u8, start: usize) @This() {
 
     if (index == source.len) {
         switch (state) {
-            .text_period1 => res.end = index,
+            .text_period1, .text_hyphen => res.end = index,
             else => {},
         }
     }

@@ -430,6 +430,62 @@ fn parseTextSpan(parent_events: *djot.EventCursor, parent_tokens: *djot.TokCurso
             }
         },
 
+        .hyphen => {
+            var num_hyphens: u32 = 0;
+            while (tokens.expect(.hyphen)) |_| : (num_hyphens += 1) {}
+
+            if (num_hyphens == 1) {
+                _ = try events.append(.{ .text = token.start });
+            } else if (num_hyphens % 3 == 0) {
+                var i: u32 = 0;
+                while (i < num_hyphens / 3) : (i += 1) {
+                    _ = try events.append(.{ .character = unicode.EM_DASH });
+                }
+            } else if (num_hyphens % 2 == 0) {
+                var i: u32 = 0;
+                while (i < num_hyphens / 2) : (i += 1) {
+                    _ = try events.append(.{ .character = unicode.EN_DASH });
+                }
+            } else {
+                // TODO: Figure what the actual algorithm for this is
+                switch (num_hyphens) {
+                    5 => {
+                        _ = try events.append(.{ .character = unicode.EM_DASH });
+                        _ = try events.append(.{ .character = unicode.EN_DASH });
+                    },
+                    7 => {
+                        _ = try events.append(.{ .character = unicode.EM_DASH });
+                        _ = try events.append(.{ .character = unicode.EN_DASH });
+                        _ = try events.append(.{ .character = unicode.EN_DASH });
+                    },
+                    13 => {
+                        _ = try events.append(.{ .character = unicode.EM_DASH });
+                        _ = try events.append(.{ .character = unicode.EM_DASH });
+                        _ = try events.append(.{ .character = unicode.EM_DASH });
+                        _ = try events.append(.{ .character = unicode.EN_DASH });
+                        _ = try events.append(.{ .character = unicode.EN_DASH });
+                    },
+                    else => {
+                        const num_ems = ((num_hyphens + 1) / 3) / 2;
+                        const num_ens = (num_hyphens - num_ems * 3) / 2;
+                        const remain = (num_hyphens - num_ems * 3 - num_ens * 2);
+                        var i: u32 = 0;
+                        while (i < num_ems) : (i += 1) {
+                            _ = try events.append(.{ .character = unicode.EM_DASH });
+                        }
+                        i = 0;
+                        while (i < num_ens) : (i += 1) {
+                            _ = try events.append(.{ .character = unicode.EN_DASH });
+                        }
+                        i = 0;
+                        while (i < remain) : (i += 1) {
+                            _ = try events.append(.{ .text = token.start });
+                        }
+                    },
+                }
+            }
+        },
+
         .text,
         .right_angle,
         .right_square,
@@ -505,12 +561,6 @@ fn parseTextSpan(parent_events: *djot.EventCursor, parent_tokens: *djot.TokCurso
         },
         .autolink_email => {
             _ = try events.append(.{ .autolink_email = token.start });
-            tokens.index += 1;
-        },
-
-        .hyphen => {
-            // TODO: smart punctuation
-            _ = try events.append(.{ .text = token.start });
             tokens.index += 1;
         },
     }
