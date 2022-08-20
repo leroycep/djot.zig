@@ -44,6 +44,7 @@ Not started:
 
 ### Added
 
+- cli: Convert `djot` from stdin to `html`, `events`, or `tokens`
 - autolinks
 - inline verbatim
 - inline emphasis/strong

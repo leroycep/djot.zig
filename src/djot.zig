@@ -1,7 +1,7 @@
 const std = @import("std");
 const blocks = @import("./Block.zig");
 const Marker = @import("./Marker.zig");
-const Token = @import("./Token.zig");
+pub const Token = @import("./Token.zig");
 const bolt = @import("./bolt.zig");
 
 const LEFT_DOUBLE_QUOTE = '“';
@@ -124,9 +124,99 @@ pub const Document = struct {
         return struct_tag_union.toUnion();
     }
 
-    pub fn asText(this: @This(), index: usize) []const u8 {
-        return this.event(index).asText(this.source);
+    /// Only valid for events with a SourceIndex payload
+    pub fn asText(this: @This(), event_index: usize) []const u8 {
+        switch (this.event(event_index)) {
+            .text => |source_index| {
+                const token = Token.parse(this.source, source_index);
+                return this.source[token.start..token.end];
+            },
+
+            .autolink, .autolink_email => |source_index| {
+                const token = Token.parse(this.source, source_index);
+                return this.source[token.start + 1 .. token.end - 1];
+            },
+
+            .escaped => |source_index| {
+                const token = Token.parse(this.source, source_index);
+                return this.source[token.start + 1 .. token.end];
+            },
+
+            .start_list_item,
+            .close_list_item,
+            => |source_index| {
+                var source_pos: usize = source_index;
+                const marker = Marker.parse(this.source, &source_pos).?;
+                return this.source[marker.start..marker.end];
+            },
+
+            .start_link,
+            .close_link,
+            .start_image_link,
+            .close_image_link,
+            => |source_index| {
+                const token = Token.parse(this.source, source_index);
+                return this.source[token.start + 2 .. token.end - 1];
+            },
+
+            else => |ev| std.debug.panic("Event {s} does not have associated text", .{std.meta.tagName(ev)}),
+        }
     }
+
+    pub fn fmtEvent(this: *const @This(), event_index: usize) FmtEventIndex {
+        return FmtEventIndex{ .document = this, .event_index = @intCast(u32, event_index) };
+    }
+
+    pub const FmtEventIndex = struct {
+        document: *const Document,
+        event_index: u32,
+
+        pub fn format(
+            this: @This(),
+            comptime fmt: []const u8,
+            options: std.fmt.FormatOptions,
+            writer: anytype,
+        ) !void {
+            _ = fmt;
+            _ = options;
+            const ev = this.document.event(this.event_index);
+            try writer.print("{s}", .{std.meta.tagName(ev)});
+            switch (ev) {
+                .text,
+                .escaped,
+                .autolink,
+                .autolink_email,
+                .start_list_item,
+                .close_list_item,
+                .start_link,
+                .close_link,
+                .start_image_link,
+                .close_image_link,
+                => |_| try writer.print(" \"{}\"", .{std.zig.fmtEscapes(this.document.asText(this.event_index))}),
+
+                .start_heading,
+                .close_heading,
+                => |level| try writer.print(" {}", .{level}),
+
+                .start_list,
+                .close_list,
+                => |list| try writer.print(" {s}", .{std.meta.tagName(list.style)}),
+
+                // Events that are only tags just print the tag name
+                .start_paragraph,
+                .close_paragraph,
+                .start_quote,
+                .close_quote,
+                .start_verbatim,
+                .close_verbatim,
+                .start_strong,
+                .close_strong,
+                .start_emphasis,
+                .close_emphasis,
+                => {},
+            }
+        }
+    };
 };
 
 pub const Event = union(Kind) {
@@ -207,99 +297,7 @@ pub const Event = union(Kind) {
 
         start_image_link,
         close_image_link,
-    };
 
-    /// Only valid for events with a SourceIndex payload
-    pub fn asText(this: @This(), source: []const u8) []const u8 {
-        switch (this) {
-            .text => |source_index| {
-                const token = Token.parse(source, source_index);
-                return source[token.start..token.end];
-            },
-
-            .autolink, .autolink_email => |source_index| {
-                const token = Token.parse(source, source_index);
-                return source[token.start + 1 .. token.end - 1];
-            },
-
-            .escaped => |source_index| {
-                const token = Token.parse(source, source_index);
-                return source[token.start + 1 .. token.end];
-            },
-
-            .start_list_item,
-            .close_list_item,
-            => |source_index| {
-                var source_pos: usize = source_index;
-                const marker = Marker.parse(source, &source_pos).?;
-                return source[marker.start..marker.end];
-            },
-
-            .start_link,
-            .close_link,
-            .start_image_link,
-            .close_image_link,
-            => |source_index| {
-                const token = Token.parse(source, source_index);
-                return source[token.start + 2 .. token.end - 1];
-            },
-
-            else => std.debug.panic("Event {s} does not have associated text", .{std.meta.tagName(this)}),
-        }
-    }
-
-    pub fn fmtWithSource(this: @This(), source: []const u8) FmtWithSource {
-        return FmtWithSource{ .event = this, .source = source };
-    }
-
-    pub const FmtWithSource = struct {
-        event: Event,
-        source: []const u8,
-
-        pub fn format(
-            this: @This(),
-            comptime fmt: []const u8,
-            options: std.fmt.FormatOptions,
-            writer: anytype,
-        ) !void {
-            _ = fmt;
-            _ = options;
-            try writer.print("{s}", .{std.meta.tagName(this.event)});
-            switch (this.event) {
-                .text,
-                .escaped,
-                .autolink,
-                .autolink_email,
-                .start_list_item,
-                .close_list_item,
-                .start_link,
-                .close_link,
-                .start_image_link,
-                .close_image_link,
-                => |_| try writer.print(" \"{}\"", .{std.zig.fmtEscapes(this.event.asText(this.source))}),
-
-                .start_heading,
-                .close_heading,
-                => |level| try writer.print(" {}", .{level}),
-
-                .start_list,
-                .close_list,
-                => |list| try writer.print(" {s}", .{std.meta.tagName(list.style)}),
-
-                // Events that are only tags just print the tag name
-                .start_paragraph,
-                .close_paragraph,
-                .start_quote,
-                .close_quote,
-                .start_verbatim,
-                .close_verbatim,
-                .start_strong,
-                .close_strong,
-                .start_emphasis,
-                .close_emphasis,
-                => {},
-            }
-        }
     };
 };
 
