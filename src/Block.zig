@@ -693,7 +693,7 @@ fn parseTextSpanVerbatim(parent_events: *djot.EventCursor, parent_tokens: *djot.
                     }
                 }
 
-                _ = try events.append(.{ .text = tokens.index });
+                _ = try events.append(.{ .text = tokens.startOf(tokens.index) });
                 tokens.index += 1;
             },
 
