@@ -75,7 +75,7 @@ pub const raw = struct {
         var index = parent_index.*;
 
         for (string) |t| {
-            expect(source, &index, t) orelse return null;
+            _ = expect(T, I, source, &index, t) orelse return null;
         }
 
         parent_index.* = index;

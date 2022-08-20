@@ -3,6 +3,7 @@ const builtin = @import("builtin");
 const Marker = @import("./Marker.zig");
 const djot = @import("./djot.zig");
 const Token = @import("./Token.zig");
+const unicode = @import("./unicode.zig");
 
 pub const Blocks = struct {
     tight: bool,
@@ -138,8 +139,6 @@ pub fn parseCodeBlock(parent_events: *djot.EventCursor, parent_tokens: *djot.Tok
         if (std.mem.indexOfAny(u8, tokens.source[text.start..text.end], " ") != null) return null;
 
         // TODO: attach language info; check if it is a raw block
-        _ = language;
-
         _ = try events.append(.{ .start_code_language = tokens.startOf(language) });
     } else {
         _ = try events.append(.start_code_block);
@@ -179,7 +178,6 @@ pub fn parseCodeBlock(parent_events: *djot.EventCursor, parent_tokens: *djot.Tok
 
     if (language_or_null) |language| {
         // TODO: attach language info; check if it is a raw block
-        _ = language;
         _ = try events.append(.{ .close_code_language = tokens.startOf(language) });
     } else {
         _ = try events.append(.close_code_block);
@@ -423,13 +421,29 @@ fn parseTextSpan(parent_events: *djot.EventCursor, parent_tokens: *djot.TokCurso
             _ = tokens.next();
         },
 
+        .period => {
+            if (tokens.expectString(&.{ .period, .period, .period })) |_| {
+                _ = try events.append(.{ .character = unicode.ELLIPSES });
+            } else {
+                _ = try events.append(.{ .text = token.start });
+                tokens.index += 1;
+            }
+        },
+
         .text,
         .right_angle,
         .right_square,
         .heading,
         .nonbreaking_space,
-        .marker,
         .space,
+        .colon,
+        .plus,
+        .right_paren,
+        .digits,
+        .lower_alpha,
+        .upper_alpha,
+        .lower_roman,
+        .upper_roman,
         => {
             _ = try events.append(.{ .text = token.start });
             tokens.index += 1;
@@ -567,11 +581,16 @@ fn parseInlineFormatting(parent_events: *djot.EventCursor, parent_tokens: *djot.
 
     switch (tokens.kindOf(open)) {
         .asterisk,
-        .space_asterisk,
         .underscore,
+        => if (tokens.expect(.space)) |_| {
+            return null;
+        },
+        .space_asterisk,
         .space_underscore,
         => if (tokens.expect(.space)) |_| {
             return null;
+        } else {
+            _ = try events.append(.{ .character = ' ' });
         },
         else => {},
     }
@@ -685,7 +704,6 @@ fn parseTextSpanVerbatim(parent_events: *djot.EventCursor, parent_tokens: *djot.
             .right_square,
             .heading,
             .nonbreaking_space,
-            .marker,
             .hard_line_break,
             .escape,
 
@@ -705,6 +723,17 @@ fn parseTextSpanVerbatim(parent_events: *djot.EventCursor, parent_tokens: *djot.
             .exclaimation,
 
             .hyphen,
+
+            .period,
+            .colon,
+            .plus,
+            .right_paren,
+
+            .digits,
+            .lower_alpha,
+            .upper_alpha,
+            .lower_roman,
+            .upper_roman,
             => {
                 _ = try events.append(.{ .text = tokens.startOf(tokens.index) });
                 tokens.index += 1;

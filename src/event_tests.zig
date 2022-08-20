@@ -9,11 +9,13 @@ test "events heading" {
         \\
     , &.{
         .{ .start_heading = 2 },
-        .{ .text = "A level " },
+        .{ .text = "A level" },
+        .{ .character = ' ' },
         .start_emphasis,
         .{ .text = "two" },
         .close_emphasis,
-        .{ .text = " heading" },
+        .{ .text = " " },
+        .{ .text = "heading" },
         .{ .close_heading = 2 },
     });
 }
@@ -241,6 +243,7 @@ test "events loose list" {
 
 const TestEvent = union(djot.Event.Kind) {
     text: []const u8,
+    character: u21,
     escaped: []const u8,
     autolink: []const u8,
     autolink_email: []const u8,
@@ -304,6 +307,12 @@ const TestEvent = union(djot.Event.Kind) {
             .start_code_language,
             .close_code_language,
             => |text| try writer.print(" \"{}\"", .{std.zig.fmtEscapes(text)}),
+
+            .character => |c| {
+                var buf: [4]u8 = undefined;
+                const nbytes = std.unicode.utf8Encode(c, &buf) catch unreachable;
+                try writer.print(" '{'}'", .{std.zig.fmtEscapes(buf[0..nbytes])});
+            },
 
             .start_heading,
             .close_heading,

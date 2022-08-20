@@ -3,11 +3,7 @@ const blocks = @import("./Block.zig");
 const Marker = @import("./Marker.zig");
 pub const Token = @import("./Token.zig");
 const bolt = @import("./bolt.zig");
-
-const LEFT_DOUBLE_QUOTE = '“';
-const RIGHT_DOUBLE_QUOTE = '”';
-const LEFT_SINGLE_QUOTE = '‘';
-const RIGHT_SINGLE_QUOTE = '’';
+const unicode = @import("./unicode.zig");
 
 pub fn toHtml(allocator: std.mem.Allocator, source: []const u8, html_writer: anytype) !void {
     var doc = try parse(allocator, source);
@@ -27,16 +23,35 @@ pub fn toHtml(allocator: std.mem.Allocator, source: []const u8, html_writer: any
                     // TODO: check this earlier?
                     if (i + codepoint_length > t.len) return error.InvalidUTF8;
                     switch (try std.unicode.utf8Decode(t[i..][0..codepoint_length])) {
-                        '…' => try html_writer.writeAll("&hellip;"),
-                        '–' => try html_writer.writeAll("&ndash;"),
-                        '—' => try html_writer.writeAll("&mdash;"),
-                        LEFT_DOUBLE_QUOTE => try html_writer.writeAll("&ldquo;"),
-                        RIGHT_DOUBLE_QUOTE => try html_writer.writeAll("&rdquo;"),
-                        LEFT_SINGLE_QUOTE => try html_writer.writeAll("&lsquo;"),
-                        RIGHT_SINGLE_QUOTE => try html_writer.writeAll("&rsquo;"),
+                        unicode.ELLIPSES => try html_writer.writeAll("&hellip;"),
+                        unicode.EN_DASH => try html_writer.writeAll("&ndash;"),
+                        unicode.EM_DASH => try html_writer.writeAll("&mdash;"),
+                        unicode.LEFT_DOUBLE_QUOTE => try html_writer.writeAll("&ldquo;"),
+                        unicode.RIGHT_DOUBLE_QUOTE => try html_writer.writeAll("&rdquo;"),
+                        unicode.LEFT_SINGLE_QUOTE => try html_writer.writeAll("&lsquo;"),
+                        unicode.RIGHT_SINGLE_QUOTE => try html_writer.writeAll("&rsquo;"),
                         else => try html_writer.writeAll(t[i..][0..codepoint_length]),
                     }
                     i += codepoint_length;
+                }
+            },
+
+            .character => {
+                const c = doc.events.items(.data)[event_index].character;
+                // TODO: check this earlier?
+                switch (c) {
+                    unicode.ELLIPSES => try html_writer.writeAll("&hellip;"),
+                    unicode.EN_DASH => try html_writer.writeAll("&ndash;"),
+                    unicode.EM_DASH => try html_writer.writeAll("&mdash;"),
+                    unicode.LEFT_DOUBLE_QUOTE => try html_writer.writeAll("&ldquo;"),
+                    unicode.RIGHT_DOUBLE_QUOTE => try html_writer.writeAll("&rdquo;"),
+                    unicode.LEFT_SINGLE_QUOTE => try html_writer.writeAll("&lsquo;"),
+                    unicode.RIGHT_SINGLE_QUOTE => try html_writer.writeAll("&rsquo;"),
+                    else => {
+                        var buf: [4]u8 = undefined;
+                        const nbytes = try std.unicode.utf8Encode(c, &buf);
+                        try html_writer.writeAll(buf[0..nbytes]);
+                    },
                 }
             },
 
@@ -88,7 +103,7 @@ pub fn toHtml(allocator: std.mem.Allocator, source: []const u8, html_writer: any
             .close_heading => try html_writer.print("</h{}>", .{doc.events.items(.data)[event_index].close_heading}),
 
             .start_list => try html_writer.writeAll("<ul>"),
-            .close_list => try html_writer.writeAll("</ul>"),
+            .close_list => try html_writer.writeAll("</ul>\n"),
 
             .start_list_item => try html_writer.writeAll("<li>"),
             .close_list_item => try html_writer.writeAll("</li>"),
@@ -206,6 +221,12 @@ pub const Document = struct {
                 .close_code_language,
                 => |_| try writer.print(" \"{}\"", .{std.zig.fmtEscapes(this.document.asText(this.event_index))}),
 
+                .character => |c| {
+                    var buf: [4]u8 = undefined;
+                    const nbytes = std.unicode.utf8Encode(c, &buf) catch unreachable;
+                    try writer.print(" '{'}'", .{std.zig.fmtEscapes(buf[0..nbytes])});
+                },
+
                 .start_heading,
                 .close_heading,
                 => |level| try writer.print(" {}", .{level}),
@@ -236,6 +257,7 @@ pub const Document = struct {
 
 pub const Event = union(Kind) {
     text: SourceIndex,
+    character: u21,
     escaped: SourceIndex,
     autolink: SourceIndex,
     autolink_email: SourceIndex,
@@ -286,6 +308,7 @@ pub const Event = union(Kind) {
 
     pub const Kind = enum {
         text,
+        character,
         escaped,
         autolink,
         autolink_email,
@@ -473,6 +496,11 @@ pub const TokCursor = struct {
 
     pub fn startOf(this: @This(), index: Index) u32 {
         return this.tokens.items(.start)[index];
+    }
+
+    pub fn endOf(this: @This(), index: Index) u32 {
+        if (index + 1 >= this.tokens.len) return @intCast(u32, this.source.len);
+        return this.tokens.items(.start)[index + 1];
     }
 
     pub fn kindOf(this: @This(), index: Index) Token.Kind {

@@ -96,25 +96,92 @@ pub fn parse(source: []const u8, parent_index: *usize) ?Marker {
 pub fn parseTok(parent_tokens: *djot.TokCursor) ?Marker {
     var tokens = parent_tokens.*;
 
-    if (tokens.expect(.marker)) |token_index| {
-        const token = tokens.token(token_index);
-        parent_tokens.* = tokens;
-        return Marker{
-            .style = getStyle(tokens.source, token).?,
-            .start = token.start,
-            .end = token.end,
-        };
+    var res = Marker{
+        .start = tokens.startOf(tokens.index),
+        .end = undefined,
+        .style = undefined,
+    };
+
+    switch (tokens.kindOf(tokens.index)) {
+        .colon => {
+            tokens.index += 1;
+            res.style = .definition;
+        },
+
+        .asterisk => {
+            tokens.index += 1;
+            res.style = .asterisk;
+        },
+
+        .hyphen => {
+            tokens.index += 1;
+            res.style = .hyphen;
+        },
+
+        .plus => {
+            tokens.index += 1;
+            res.style = .plus;
+        },
+
+        .digits => {
+            tokens.index += 1;
+            switch (tokens.kindOf(tokens.index)) {
+                .period => res.style = .decimal_period,
+                .right_paren => res.style = .decimal_paren,
+                else => return null,
+            }
+            tokens.index += 1;
+        },
+
+        .lower_alpha => {
+            tokens.index += 1;
+            switch (tokens.kindOf(tokens.index)) {
+                .period => res.style = .lower_alpha_period,
+                .right_paren => res.style = .lower_alpha_paren,
+                else => return null,
+            }
+            tokens.index += 1;
+        },
+
+        .upper_alpha => {
+            tokens.index += 1;
+            switch (tokens.kindOf(tokens.index)) {
+                .period => res.style = .upper_alpha_period,
+                .right_paren => res.style = .upper_alpha_paren,
+                else => return null,
+            }
+            tokens.index += 1;
+        },
+
+        .lower_roman => {
+            tokens.index += 1;
+            switch (tokens.kindOf(tokens.index)) {
+                .period => res.style = .lower_roman_period,
+                .right_paren => res.style = .lower_roman_paren,
+                else => return null,
+            }
+            tokens.index += 1;
+        },
+
+        .upper_roman => {
+            tokens.index += 1;
+            switch (tokens.kindOf(tokens.index)) {
+                .period => res.style = .upper_roman_period,
+                .right_paren => res.style = .upper_roman_paren,
+                else => return null,
+            }
+            tokens.index += 1;
+        },
+
+        else => return null,
     }
 
-    if (tokens.expectInList(&.{ .asterisk, .hyphen })) |bullet_index| {
-        _ = tokens.expect(.space) orelse return null;
-        parent_tokens.* = tokens;
-        var marker_index: usize = tokens.startOf(bullet_index);
-        const marker = parse(tokens.source, &marker_index).?;
-        return marker;
-    }
+    const space = tokens.expectInList(&.{ .space, .line_break }) orelse return null;
+    res.end = tokens.endOf(space);
 
-    return null;
+    parent_tokens.* = tokens;
+
+    return res;
 }
 
 fn parseEnclosedMarker(source: []const u8, parent_index: *usize) ?Marker {

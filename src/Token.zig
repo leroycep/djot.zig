@@ -13,13 +13,18 @@ pub const Kind = enum(u8) {
     nonbreaking_space,
     text,
 
+    digits,
+    lower_alpha,
+    upper_alpha,
+    lower_roman,
+    upper_roman,
+
     escape,
     heading,
     right_angle,
     left_square,
     right_square,
-
-    marker,
+    right_paren,
 
     ticks,
 
@@ -39,6 +44,9 @@ pub const Kind = enum(u8) {
     exclaimation,
 
     hyphen,
+    period,
+    colon,
+    plus,
 
     pub fn isAsterisk(this: @This()) bool {
         switch (this) {
@@ -104,7 +112,6 @@ pub fn parse(source: []const u8, start: usize) @This() {
         heading,
         escape,
 
-        marker_end,
         digits,
         lower_roman,
         upper_roman,
@@ -198,11 +205,6 @@ pub fn parse(source: []const u8, start: usize) @This() {
                     res.end = index;
                     break;
                 },
-                '+' => {
-                    res.kind = .text;
-                    res.end = index;
-                    state = .marker_end;
-                },
                 '`' => {
                     res.kind = .ticks;
                     res.end = index;
@@ -213,28 +215,48 @@ pub fn parse(source: []const u8, start: usize) @This() {
                     res.end = index;
                     state = .escape;
                 },
+                '.' => {
+                    res.kind = .period;
+                    res.end = index;
+                    break;
+                },
+                ':' => {
+                    res.kind = .colon;
+                    res.end = index;
+                    break;
+                },
+                ')' => {
+                    res.kind = .right_paren;
+                    res.end = index;
+                    break;
+                },
+                '+' => {
+                    res.kind = .plus;
+                    res.end = index;
+                    break;
+                },
                 '0'...'9' => {
-                    res.kind = .text;
+                    res.kind = .digits;
                     res.end = index;
                     state = .digits;
                 },
                 'I', 'V', 'X', 'L', 'C', 'D', 'M' => {
-                    res.kind = .text;
+                    res.kind = .upper_roman;
                     res.end = index;
                     state = .upper_roman;
                 },
                 'i', 'v', 'x', 'l', 'c', 'd', 'm' => {
-                    res.kind = .text;
+                    res.kind = .lower_roman;
                     res.end = index;
                     state = .lower_roman;
                 },
                 'A'...'B', 'E'...'H', 'J'...'K', 'N'...'U', 'W', 'Y', 'Z' => {
-                    res.kind = .text;
+                    res.kind = .upper_alpha;
                     res.end = index;
                     state = .upper_alpha;
                 },
                 'a'...'b', 'e'...'h', 'j'...'k', 'n'...'u', 'w', 'y', 'z' => {
-                    res.kind = .text;
+                    res.kind = .lower_alpha;
                     res.end = index;
                     state = .lower_alpha;
                 },
@@ -279,9 +301,14 @@ pub fn parse(source: []const u8, start: usize) @This() {
                 '!',
                 '[',
                 ']',
+                ')',
                 => break,
 
-                ' ' => state = .text_space,
+                ' ' => {
+                    res.kind = .text;
+                    state = .text_space;
+                },
+                '.' => break,
 
                 else => {
                     res.end = index;
@@ -292,7 +319,6 @@ pub fn parse(source: []const u8, start: usize) @This() {
                 '`',
                 '*',
                 '_',
-                ' ',
                 '{',
                 '\n',
                 '\\',
@@ -300,9 +326,14 @@ pub fn parse(source: []const u8, start: usize) @This() {
                 '!',
                 '[',
                 ']',
+                '.',
+                ')',
                 => break,
 
+                ' ' => {},
+
                 else => {
+                    res.kind = .text;
                     res.end = index;
                     state = .text;
                 },
@@ -331,38 +362,14 @@ pub fn parse(source: []const u8, start: usize) @This() {
                     state = .text;
                 },
             },
-            .marker_end => switch (c) {
-                ' ',
-                '\t',
-                => {
-                    res.kind = .marker;
-                    res.end = index;
-                    break;
-                },
-                else => break,
-            },
             .digits => switch (c) {
                 '0'...'9' => res.end = index,
-
-                '.',
-                ')',
-                => {
+                ' ' => {
+                    res.kind = .text;
                     res.end = index;
-                    state = .marker_end;
+                    state = .text_space;
                 },
-
-                '_',
-                '\n',
-                '!',
-                '[',
-                ']',
-                '<',
-                => break,
-
-                else => {
-                    res.end = index;
-                    state = .text;
-                },
+                else => break,
             },
             .lower_roman => switch (c) {
                 'i', 'v', 'x', 'l', 'c', 'd', 'm' => res.end = index,
@@ -370,115 +377,43 @@ pub fn parse(source: []const u8, start: usize) @This() {
                     res.end = index;
                     state = .lower_alpha;
                 },
-
-                '.',
-                ')',
-                => {
+                ' ', 'A'...'Z', '0'...'9' => {
+                    res.kind = .text;
                     res.end = index;
-                    state = .marker_end;
+                    state = .text_space;
                 },
-
-                '`',
-                '*',
-                '_',
-                '{',
-                '\\',
-                '\n',
-                '!',
-                '[',
-                ']',
-                '<',
-                => break,
-
-                else => {
-                    res.end = index;
-                    state = .text;
-                },
+                else => break,
             },
             .upper_roman => switch (c) {
                 'I', 'V', 'X', 'L', 'C', 'D', 'M' => res.end = index,
                 'A'...'B', 'E'...'H', 'J'...'K', 'N'...'U', 'W', 'Y', 'Z' => {
                     res.end = index;
-                    state = .lower_alpha;
+                    state = .upper_alpha;
                 },
-
-                '.',
-                ')',
-                => {
+                ' ', 'a'...'z', '0'...'9' => {
+                    res.kind = .text;
                     res.end = index;
-                    state = .marker_end;
+                    state = .text_space;
                 },
-
-                '`',
-                '*',
-                '_',
-                '{',
-                '\\',
-                '\n',
-                '!',
-                '[',
-                ']',
-                '<',
-                => break,
-
-                else => {
-                    res.end = index;
-                    state = .text;
-                },
+                else => break,
             },
             .lower_alpha => switch (c) {
                 'a'...'z' => res.end = index,
-
-                '.',
-                ')',
-                => {
+                ' ', 'A'...'Z', '0'...'9' => {
+                    res.kind = .text;
                     res.end = index;
-                    state = .marker_end;
+                    state = .text_space;
                 },
-
-                '`',
-                '*',
-                '_',
-                '{',
-                '\\',
-                '\n',
-                '!',
-                '[',
-                ']',
-                '<',
-                => break,
-
-                else => {
-                    res.end = index;
-                    state = .text;
-                },
+                else => break,
             },
             .upper_alpha => switch (c) {
                 'A'...'Z' => res.end = index,
-
-                '.',
-                ')',
-                => {
+                ' ', 'a'...'z', '0'...'9' => {
+                    res.kind = .text;
                     res.end = index;
-                    state = .marker_end;
+                    state = .text_space;
                 },
-
-                '`',
-                '*',
-                '_',
-                '{',
-                '\\',
-                '\n',
-                '!',
-                '[',
-                ']',
-                '<',
-                => break,
-
-                else => {
-                    res.end = index;
-                    state = .text;
-                },
+                else => break,
             },
             .lcurl => switch (c) {
                 '*' => {
