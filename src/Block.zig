@@ -320,7 +320,7 @@ fn parseTextSpan(parent_events: *djot.EventCursor, parent_tokens: *djot.TokCurso
 
         .text,
         .right_angle,
-        .right_square,
+        .left_paren,
         .heading,
         .nonbreaking_space,
         .marker,
@@ -355,6 +355,8 @@ fn parseTextSpan(parent_events: *djot.EventCursor, parent_tokens: *djot.TokCurso
         .close_asterisk,
         .close_underscore,
         .inline_link_url,
+        .right_square,
+        .right_paren,
         => {
             if (opener) |o| {
                 if (o.isEnd(tokens, tokens.index)) {
@@ -436,11 +438,36 @@ fn parseInlineLink(parent_events: *djot.EventCursor, parent_tokens: *djot.TokCur
             tokens.index += 1;
         },
 
+        .right_square => {
+            tokens.index += 1;
+            const left_paren = tokens.expect(.left_paren) orelse return null;
+
+            const link_text = (try parseLinkText(&events, &tokens, prefix, &.{ .prev = prev_opener, .tok = tokens.tokOf(left_paren) })) orelse return null;
+
+            events.set(start_event, .{ .start_link = link_text });
+            _ = try events.append(.{ .close_link = link_text });
+        },
+
         else => return null,
     }
 
     parent_tokens.* = tokens;
     parent_events.* = events;
+}
+
+fn parseLinkText(parent_events: *djot.EventCursor, parent_tokens: *djot.TokCursor, prefix: ?*const Prefix, opener: ?*const PrevOpener) djot.Error!?u32 {
+    var events = parent_events.*;
+    var tokens = parent_tokens.*;
+
+    // TODO: Parse text
+    const start_of = tokens.startOf(tokens.index);
+    _ = (try parseTextSpans(&events, &tokens, prefix, opener)) orelse return null;
+
+    _ = tokens.expect(.right_paren) orelse return null;
+
+    parent_tokens.* = tokens;
+    parent_events.* = events;
+    return start_of;
 }
 
 fn parseInlineFormatting(parent_events: *djot.EventCursor, parent_tokens: *djot.TokCursor, prefix: ?*const Prefix, prev_opener: ?*const PrevOpener) djot.Error!?void {
@@ -538,6 +565,8 @@ fn parseTextSpanVerbatim(parent_events: *djot.EventCursor, parent_tokens: *djot.
             .right_angle,
             .left_square,
             .right_square,
+            .left_paren,
+            .right_paren,
             .heading,
             .nonbreaking_space,
             .marker,
@@ -640,8 +669,16 @@ const PrevOpener = struct {
                 return true;
             },
 
-            .inline_link_url => if (this.tok.kind == .left_square) {
-                return true;
+            .inline_link_url,
+            .right_square,
+            => switch (this.tok.kind) {
+                .left_square => return true,
+                else => {},
+            },
+
+            .right_paren => switch (this.tok.kind) {
+                .left_paren => return true,
+                else => {},
             },
 
             else => {},

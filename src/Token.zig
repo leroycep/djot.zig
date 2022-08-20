@@ -18,6 +18,8 @@ pub const Kind = enum(u8) {
     right_angle,
     left_square,
     right_square,
+    left_paren,
+    right_paren,
 
     marker,
 
@@ -189,6 +191,16 @@ pub fn parse(source: []const u8, start: usize) @This() {
                     res.end = index;
                     state = .rsquare;
                 },
+                '(' => {
+                    res.kind = .left_paren;
+                    res.end = index;
+                    break;
+                },
+                ')' => {
+                    res.kind = .right_paren;
+                    res.end = index;
+                    break;
+                },
                 '-',
                 '+',
                 => {
@@ -250,6 +262,8 @@ pub fn parse(source: []const u8, start: usize) @This() {
                 '!',
                 '[',
                 ']',
+                '(',
+                ')',
                 => break,
 
                 ' ' => state = .text_space,
@@ -271,6 +285,8 @@ pub fn parse(source: []const u8, start: usize) @This() {
                 '!',
                 '[',
                 ']',
+                '(',
+                ')',
                 => break,
 
                 ' ' => state = .text_space,
@@ -347,6 +363,7 @@ pub fn parse(source: []const u8, start: usize) @This() {
                 '!',
                 '[',
                 ']',
+                '(',
                 => break,
 
                 else => {
@@ -377,6 +394,7 @@ pub fn parse(source: []const u8, start: usize) @This() {
                 '!',
                 '[',
                 ']',
+                '(',
                 => break,
 
                 else => {
@@ -407,6 +425,7 @@ pub fn parse(source: []const u8, start: usize) @This() {
                 '!',
                 '[',
                 ']',
+                '(',
                 => break,
 
                 else => {
@@ -433,6 +452,7 @@ pub fn parse(source: []const u8, start: usize) @This() {
                 '!',
                 '[',
                 ']',
+                '(',
                 => break,
 
                 else => {
@@ -459,6 +479,7 @@ pub fn parse(source: []const u8, start: usize) @This() {
                 '!',
                 '[',
                 ']',
+                '(',
                 => break,
 
                 else => {
@@ -536,6 +557,10 @@ pub fn parse(source: []const u8, start: usize) @This() {
                 else => break,
             },
             .rsquare_lparen_url => switch (c) {
+                '*',
+                '_',
+                '\\',
+                => break,
                 ')' => {
                     res.kind = .inline_link_url;
                     res.end = index;
@@ -547,4 +572,17 @@ pub fn parse(source: []const u8, start: usize) @This() {
     }
 
     return res;
+}
+
+pub fn asText(this: @This(), source: []const u8) []const u8 {
+    switch (this.kind) {
+        .autolink,
+        .autolink_email,
+        => return source[this.start + 1 .. this.end - 1],
+
+        .escape => return source[this.start + 1 .. this.end],
+        .inline_link_url => return source[this.start + 2 .. this.end - 1],
+
+        else => return source[this.start..this.end],
+    }
 }

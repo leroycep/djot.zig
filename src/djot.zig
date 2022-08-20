@@ -102,11 +102,11 @@ pub fn toHtml(allocator: std.mem.Allocator, source: []const u8) ![]const u8 {
             .start_verbatim => try html.appendSlice("<code>"),
             .close_verbatim => try html.appendSlice("</code>"),
 
-            .start_strong => try html.appendSlice("<strong>"),
-            .close_strong => try html.appendSlice("</strong>"),
+            .start_strong => if (in_alt_text < 1) try html.appendSlice("<strong>"),
+            .close_strong => if (in_alt_text < 1) try html.appendSlice("</strong>"),
 
-            .start_emphasis => try html.appendSlice("<em>"),
-            .close_emphasis => try html.appendSlice("</em>"),
+            .start_emphasis => if (in_alt_text < 1) try html.appendSlice("<em>"),
+            .close_emphasis => if (in_alt_text < 1) try html.appendSlice("</em>"),
         }
     }
 
@@ -116,9 +116,11 @@ pub fn toHtml(allocator: std.mem.Allocator, source: []const u8) ![]const u8 {
 pub const Document = struct {
     source: []const u8,
     events: std.MultiArrayList(StructTaggedUnion(Event)).Slice,
+    links: []const u8,
 
     pub fn deinit(this: *@This(), allocator: std.mem.Allocator) void {
         this.events.deinit(allocator);
+        allocator.free(this.links);
     }
 
     pub fn event(this: @This(), index: usize) Event {
@@ -165,17 +167,19 @@ pub const Event = union(Kind) {
     start_emphasis,
     close_emphasis,
 
-    start_link: SourceIndex,
-    close_link: SourceIndex,
+    start_link: LinksIndex,
+    close_link: LinksIndex,
 
-    start_image_link: SourceIndex,
-    close_image_link: SourceIndex,
+    start_image_link: LinksIndex,
+    close_image_link: LinksIndex,
 
     pub const List = struct {
         style: Marker.Style,
     };
 
     const SourceIndex = u32;
+
+    const LinksIndex = u32;
 
     pub const Kind = enum {
         text,
@@ -217,21 +221,6 @@ pub const Event = union(Kind) {
     /// Only valid for events with a SourceIndex payload
     pub fn asText(this: @This(), source: []const u8) []const u8 {
         switch (this) {
-            .text => |source_index| {
-                const token = Token.parse(source, source_index);
-                return source[token.start..token.end];
-            },
-
-            .autolink, .autolink_email => |source_index| {
-                const token = Token.parse(source, source_index);
-                return source[token.start + 1 .. token.end - 1];
-            },
-
-            .escaped => |source_index| {
-                const token = Token.parse(source, source_index);
-                return source[token.start + 1 .. token.end];
-            },
-
             .start_list_item,
             .close_list_item,
             => |source_index| {
@@ -240,14 +229,15 @@ pub const Event = union(Kind) {
                 return source[marker.start..marker.end];
             },
 
+            .text,
+            .autolink,
+            .autolink_email,
+            .escaped,
             .start_link,
             .close_link,
             .start_image_link,
             .close_image_link,
-            => |source_index| {
-                const token = Token.parse(source, source_index);
-                return source[token.start + 2 .. token.end - 1];
-            },
+            => |source_index| return Token.parse(source, source_index).asText(source),
 
             else => std.debug.panic("Event {s} does not have associated text", .{std.meta.tagName(this)}),
         }
@@ -315,10 +305,15 @@ pub fn parse(allocator: std.mem.Allocator, source: []const u8) Error!Document {
     var events = std.MultiArrayList(StructTaggedUnion(Event)){};
     defer events.deinit(allocator);
 
+    var links = std.ArrayList(u8).init(allocator);
+    defer events.deinit(allocator);
+
     var event_cursor = EventCursor{
         .allocator = allocator,
         .events = &events,
         .index = 0,
+        .links = &links,
+        .links_index = 0,
     };
     var tok_cursor = TokCursor{
         .source = source,
@@ -347,6 +342,7 @@ pub fn parse(allocator: std.mem.Allocator, source: []const u8) Error!Document {
     return Document{
         .source = source,
         .events = events.toOwnedSlice(),
+        .links = links.toOwnedSlice(),
     };
 }
 
@@ -354,6 +350,9 @@ pub const EventCursor = struct {
     allocator: std.mem.Allocator,
     events: *std.MultiArrayList(StructTaggedUnion(Event)),
     index: Index,
+
+    links: *std.ArrayList(u8),
+    links_index: u32,
 
     pub const Index = u32;
 
