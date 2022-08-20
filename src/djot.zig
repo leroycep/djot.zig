@@ -321,23 +321,9 @@ pub fn parse(allocator: std.mem.Allocator, source: []const u8) Error!Document {
         .index = 0,
     };
 
-    if (false) {
-        std.debug.print("{s}:{}\n", .{ @src().fn_name, @src().line });
-        for (tokens.items(.kind)) |tag, i| {
-            std.debug.print("token[{}] = {} \"{}\"\n", .{ i, tag, std.zig.fmtEscapes(tok_cursor.text(@intCast(u32, i))) });
-        }
-    }
-
     _ = try blocks.parseBlocks(&event_cursor, &tok_cursor, null);
 
     events.len = event_cursor.index;
-
-    if (false) {
-        std.debug.print("{s}:{}\n", .{ @src().fn_name, @src().line });
-        for (events.items(.tag)) |_, i| {
-            std.debug.print("event[{}] = {}\n", .{ i, events.get(i).toUnion().fmtWithSource(source) });
-        }
-    }
 
     return Document{
         .source = source,
