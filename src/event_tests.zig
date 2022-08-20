@@ -339,7 +339,7 @@ fn testParse(source: []const u8, expected: []const TestEvent) !void {
     defer parsed_text.deinit();
     var i: u32 = 0;
     while (i < parsed.events.len) : (i += 1) {
-        try parsed_text.writer().print("{}\n", .{parsed.event(i).fmtWithSource(source)});
+        try parsed_text.writer().print("{}\n", .{parsed.fmtEvent(i)});
     }
 
     try std.testing.expectEqualStrings(expected_text.items, parsed_text.items);

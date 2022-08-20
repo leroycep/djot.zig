@@ -43,6 +43,7 @@ pub const Kind = enum(u8) {
     pub fn isAsterisk(this: @This()) bool {
         switch (this) {
             .asterisk,
+            .space_asterisk,
             .open_asterisk,
             .close_asterisk,
             => return true,
@@ -54,6 +55,7 @@ pub const Kind = enum(u8) {
     pub fn isUnderscore(this: @This()) bool {
         switch (this) {
             .underscore,
+            .space_underscore,
             .open_underscore,
             .close_underscore,
             => return true,

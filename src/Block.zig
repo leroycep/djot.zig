@@ -312,6 +312,9 @@ fn parseTextSpans(parent_events: *djot.EventCursor, parent_tokens: *djot.TokCurs
                 if (!p.parsePrefix(&lookahead)) break;
             }
             _ = try lookahead_events.append(.{ .text = lookahead.startOf(line_break) });
+
+            // Remove spaces at start of line
+            while (lookahead.expect(.space)) |_| {}
         }
 
         _ = try parseTextSpan(&lookahead_events, &lookahead, prefix, opener) orelse break;
@@ -478,28 +481,47 @@ fn parseInlineFormatting(parent_events: *djot.EventCursor, parent_tokens: *djot.
     var events = parent_events.*;
     var tokens = parent_tokens.*;
 
-    const ASTERISK_OPEN = [_]Token.Kind{ .asterisk, .open_asterisk };
+    const ASTERISK_OPEN = [_]Token.Kind{ .asterisk, .space_asterisk, .open_asterisk };
     const ASTERISK_CLOSE = [_]Token.Kind{ .asterisk, .close_asterisk };
-    const UNDERSCORE_OPEN = [_]Token.Kind{ .underscore, .open_underscore };
+    const UNDERSCORE_OPEN = [_]Token.Kind{ .underscore, .space_underscore, .open_underscore };
     const UNDERSCORE_CLOSE = [_]Token.Kind{ .underscore, .close_underscore };
 
     const open = tokens.expectInList(&(ASTERISK_OPEN ++ UNDERSCORE_OPEN)) orelse return null;
 
     switch (tokens.kindOf(open)) {
-        .asterisk, .underscore => if (tokens.expect(.space)) |_| {
+        .asterisk,
+        .space_asterisk,
+        .underscore,
+        .space_underscore,
+        => if (tokens.expect(.space)) |_| {
             return null;
         },
         else => {},
     }
 
     const openers = switch (tokens.kindOf(open)) {
-        .asterisk, .open_asterisk => &ASTERISK_OPEN,
-        .underscore, .open_underscore => &UNDERSCORE_OPEN,
+        .asterisk,
+        .space_asterisk,
+        .open_asterisk,
+        => &ASTERISK_OPEN,
+
+        .underscore,
+        .space_underscore,
+        .open_underscore,
+        => &UNDERSCORE_OPEN,
         else => unreachable,
     };
     const opener_event: djot.Event = switch (tokens.kindOf(open)) {
-        .asterisk, .open_asterisk => .start_strong,
-        .underscore, .open_underscore => .start_emphasis,
+        .asterisk,
+        .space_asterisk,
+        .open_asterisk,
+        => .start_strong,
+
+        .underscore,
+        .space_underscore,
+        .open_underscore,
+        => .start_emphasis,
+
         else => unreachable,
     };
 
@@ -513,13 +535,28 @@ fn parseInlineFormatting(parent_events: *djot.EventCursor, parent_tokens: *djot.
     _ = (try parseTextSpans(&events, &tokens, prefix, &.{ .prev = prev_opener, .tok = tokens.tokOf(open) })) orelse return null;
 
     const closers = switch (tokens.kindOf(open)) {
-        .asterisk, .open_asterisk => &ASTERISK_CLOSE,
-        .underscore, .open_underscore => &UNDERSCORE_CLOSE,
+        .asterisk,
+        .space_asterisk,
+        .open_asterisk,
+        => &ASTERISK_CLOSE,
+
+        .underscore,
+        .space_underscore,
+        .open_underscore,
+        => &UNDERSCORE_CLOSE,
+
         else => unreachable,
     };
     const close_event: djot.Event = switch (tokens.kindOf(open)) {
-        .asterisk, .open_asterisk => .close_strong,
-        .underscore, .open_underscore => .close_emphasis,
+        .asterisk,
+        .space_asterisk,
+        .open_asterisk,
+        => .close_strong,
+
+        .underscore,
+        .space_underscore,
+        .open_underscore,
+        => .close_emphasis,
         else => unreachable,
     };
 
