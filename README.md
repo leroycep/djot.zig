@@ -85,7 +85,7 @@ $ git clone https://github.com/leroycep/djot.zig
 $ cd djot.zig
 $ zig build install -fno-stage1
 $ echo "*Hello, world!*" | ./zig-out/bin/djot.zig
-<p><strong>Hello, world!*"</strong></p>"
+<p><strong>Hello, world!*"</strong></p>
 ```
 
 ### Using `djot.zig` as a Library
