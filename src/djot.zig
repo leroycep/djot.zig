@@ -109,6 +109,8 @@ pub fn toHtml(allocator: std.mem.Allocator, source: []const u8, html_writer: any
 
             .start_code_block => try html_writer.writeAll("<pre><code>"),
             .close_code_block => try html_writer.writeAll("</code></pre>\n"),
+            .start_code_language => try html_writer.print("<pre><code class=\"language-{}\">", .{std.zig.fmtEscapes(doc.asText(event_index))}),
+            .close_code_language => try html_writer.writeAll("</code></pre>\n"),
         }
     }
 }
@@ -132,7 +134,10 @@ pub const Document = struct {
     /// Only valid for events with a SourceIndex payload
     pub fn asText(this: @This(), event_index: usize) []const u8 {
         switch (this.event(event_index)) {
-            .text => |source_index| {
+            .text,
+            .start_code_language,
+            .close_code_language,
+            => |source_index| {
                 const token = Token.parse(this.source, source_index);
                 return this.source[token.start..token.end];
             },
@@ -197,6 +202,8 @@ pub const Document = struct {
                 .close_link,
                 .start_image_link,
                 .close_image_link,
+                .start_code_language,
+                .close_code_language,
                 => |_| try writer.print(" \"{}\"", .{std.zig.fmtEscapes(this.document.asText(this.event_index))}),
 
                 .start_heading,
@@ -268,6 +275,8 @@ pub const Event = union(Kind) {
 
     start_code_block,
     close_code_block,
+    start_code_language: SourceIndex,
+    close_code_language: SourceIndex,
 
     pub const List = struct {
         style: Marker.Style,
@@ -315,6 +324,8 @@ pub const Event = union(Kind) {
 
         start_code_block,
         close_code_block,
+        start_code_language,
+        close_code_language,
     };
 };
 

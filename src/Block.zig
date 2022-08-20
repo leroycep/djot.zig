@@ -123,6 +123,9 @@ pub fn parseCodeBlock(parent_events: *djot.EventCursor, parent_tokens: *djot.Tok
     const fence = tokens.expect(.ticks) orelse return null;
     const fence_token = tokens.token(fence);
     const num_start_ticks = fence_token.end - fence_token.start;
+    if (num_start_ticks < 3) {
+        return null;
+    }
 
     while (tokens.expect(.space)) |_| {}
     const language_or_null = tokens.expect(.text);
@@ -137,7 +140,7 @@ pub fn parseCodeBlock(parent_events: *djot.EventCursor, parent_tokens: *djot.Tok
         // TODO: attach language info; check if it is a raw block
         _ = language;
 
-        _ = try events.append(.start_code_block);
+        _ = try events.append(.{ .start_code_language = tokens.startOf(language) });
     } else {
         _ = try events.append(.start_code_block);
     }
@@ -177,7 +180,7 @@ pub fn parseCodeBlock(parent_events: *djot.EventCursor, parent_tokens: *djot.Tok
     if (language_or_null) |language| {
         // TODO: attach language info; check if it is a raw block
         _ = language;
-        _ = try events.append(.close_code_block);
+        _ = try events.append(.{ .close_code_language = tokens.startOf(language) });
     } else {
         _ = try events.append(.close_code_block);
     }

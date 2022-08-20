@@ -276,6 +276,11 @@ const TestEvent = union(djot.Event.Kind) {
 
     thematic_break,
 
+    start_code_block,
+    close_code_block,
+    start_code_language: []const u8,
+    close_code_language: []const u8,
+
     pub fn format(
         this: @This(),
         comptime fmt: []const u8,
@@ -296,6 +301,8 @@ const TestEvent = union(djot.Event.Kind) {
             .close_link,
             .start_image_link,
             .close_image_link,
+            .start_code_language,
+            .close_code_language,
             => |text| try writer.print(" \"{}\"", .{std.zig.fmtEscapes(text)}),
 
             .start_heading,
@@ -318,6 +325,8 @@ const TestEvent = union(djot.Event.Kind) {
             .start_emphasis,
             .close_emphasis,
             .thematic_break,
+            .start_code_block,
+            .close_code_block,
             => {},
         }
     }
