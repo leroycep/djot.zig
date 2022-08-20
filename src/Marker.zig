@@ -106,7 +106,7 @@ pub fn parseTok(parent_tokens: *djot.TokCursor) ?Marker {
         };
     }
 
-    if (tokens.expectInList(&.{.asterisk})) |bullet_index| {
+    if (tokens.expectInList(&.{ .asterisk, .hyphen })) |bullet_index| {
         _ = tokens.expect(.space) orelse return null;
         parent_tokens.* = tokens;
         var marker_index: usize = tokens.startOf(bullet_index);

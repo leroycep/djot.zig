@@ -38,6 +38,8 @@ pub const Kind = enum(u8) {
     inline_link_url,
     exclaimation,
 
+    hyphen,
+
     pub fn isAsterisk(this: @This()) bool {
         switch (this) {
             .asterisk,
@@ -189,9 +191,12 @@ pub fn parse(source: []const u8, start: usize) @This() {
                     res.end = index;
                     state = .rsquare;
                 },
-                '-',
-                '+',
-                => {
+                '-' => {
+                    res.kind = .hyphen;
+                    res.end = index;
+                    break;
+                },
+                '+' => {
                     res.kind = .text;
                     res.end = index;
                     state = .marker_end;

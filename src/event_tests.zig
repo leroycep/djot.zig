@@ -274,6 +274,8 @@ const TestEvent = union(djot.Event.Kind) {
     start_image_link: []const u8,
     close_image_link: []const u8,
 
+    thematic_break,
+
     pub fn format(
         this: @This(),
         comptime fmt: []const u8,
@@ -315,6 +317,7 @@ const TestEvent = union(djot.Event.Kind) {
             .close_strong,
             .start_emphasis,
             .close_emphasis,
+            .thematic_break,
             => {},
         }
     }

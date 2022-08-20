@@ -57,6 +57,10 @@ pub fn parseBlock(parent_events: *djot.EventCursor, parent_tokens: *djot.TokCurs
     var tight = true;
 
     blk: {
+        if (try parseThematicBreak(&events, &tokens)) |_| {
+            break :blk;
+        }
+
         if (try parseHeading(&events, &tokens, prefix)) |_| {
             break :blk;
         }
@@ -106,6 +110,27 @@ pub fn parseNewlinePrefix(parent_tokens: *djot.TokCursor, prefix: ?*const Prefix
 
     parent_tokens.* = tokens;
     return was_newline;
+}
+
+pub fn parseThematicBreak(parent_events: *djot.EventCursor, parent_tokens: *djot.TokCursor) djot.Error!?void {
+    var tokens = parent_tokens.*;
+    var events = parent_events.*;
+
+    var num_characters: usize = 0;
+    while (tokens.expectInList(&.{ .space_asterisk, .asterisk, .hyphen, .space })) |char| : (num_characters += 1) {
+        switch (tokens.kindOf(char)) {
+            .space_asterisk, .asterisk, .hyphen => num_characters += 1,
+            else => {},
+        }
+    }
+    _ = tokens.expect(.line_break) orelse return null;
+
+    if (num_characters < 4) return null;
+
+    _ = try events.append(.thematic_break);
+
+    parent_tokens.* = tokens;
+    parent_events.* = events;
 }
 
 pub fn parseHeading(parent_events: *djot.EventCursor, parent_tokens: *djot.TokCursor, prefix: ?*const Prefix) djot.Error!?void {
@@ -388,6 +413,12 @@ fn parseTextSpan(parent_events: *djot.EventCursor, parent_tokens: *djot.TokCurso
             _ = try events.append(.{ .autolink_email = token.start });
             tokens.index += 1;
         },
+
+        .hyphen => {
+            // TODO: smart punctuation
+            _ = try events.append(.{ .text = token.start });
+            tokens.index += 1;
+        },
     }
 
     parent_tokens.* = tokens;
@@ -558,6 +589,8 @@ fn parseTextSpanVerbatim(parent_events: *djot.EventCursor, parent_tokens: *djot.
             .autolink_email,
             .inline_link_url,
             .exclaimation,
+
+            .hyphen,
             => {
                 _ = try events.append(.{ .text = tokens.startOf(tokens.index) });
                 tokens.index += 1;
