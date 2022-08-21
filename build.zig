@@ -34,11 +34,25 @@ pub fn build(b: *std.build.Builder) void {
         exe_tests.install();
     }
 
-    const test_run = exe_tests.run();
-    test_run.expected_exit_code = null;
-
     const test_step = b.step("test", "Run unit tests");
-    test_step.dependOn(&test_run.step);
+    if (b.option(bool, "fancy-test-results", "Generate an HTML page of the results (default: true)") orelse true) {
+        const fancy_exe = b.addExecutable("fancy-test-results", "tools/fancy-test-results.zig");
+        fancy_exe.setTarget(target);
+        fancy_exe.setBuildMode(mode);
+        fancy_exe.addPackagePath("bolt", "src/bolt.zig");
+        fancy_exe.addPackagePath("html", "src/html.zig");
+
+        const fancy_run = fancy_exe.run();
+        fancy_run.addFileSourceArg(exe_tests.getOutputSource());
+        fancy_run.addArg(b.zig_exe);
+
+        test_step.dependOn(&fancy_run.step);
+    } else {
+        const test_run = exe_tests.run();
+        test_run.expected_exit_code = null;
+
+        test_step.dependOn(&test_run.step);
+    }
 
     buildConvertDjotHtmlTests(b, target, mode);
 }
