@@ -382,6 +382,7 @@ fn parseTextSpans(parent_events: *djot.EventCursor, parent_tokens: *djot.TokCurs
         var lookahead = tokens;
         var lookahead_events = events;
 
+        while (lookahead.expect(.space)) |_| {}
         if (lookahead.expect(.line_break)) |line_break| {
             if (prefix) |p| {
                 if (!p.parsePrefix(&lookahead)) break;
@@ -390,6 +391,8 @@ fn parseTextSpans(parent_events: *djot.EventCursor, parent_tokens: *djot.TokCurs
 
             // Remove spaces at start of line
             while (lookahead.expect(.space)) |_| {}
+        } else {
+            lookahead = tokens;
         }
 
         _ = try parseTextSpan(&lookahead_events, &lookahead, prefix, opener) orelse break;
