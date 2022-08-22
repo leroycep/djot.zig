@@ -3,7 +3,7 @@ const blocks = @import("./Block.zig");
 const Marker = @import("./Marker.zig");
 pub const Token = @import("./Token.zig");
 const bolt = @import("./bolt.zig");
-const unicode = @import("./unicode.zig");
+const html = @import("./html.zig");
 
 pub fn toHtml(allocator: std.mem.Allocator, source: []const u8, html_writer: anytype) !void {
     var doc = try parse(allocator, source);
@@ -15,45 +15,9 @@ pub fn toHtml(allocator: std.mem.Allocator, source: []const u8, html_writer: any
         switch (event_kind) {
             .text,
             .escaped,
-            => {
-                const t = doc.asText(event_index);
-                var i: usize = 0;
-                while (i < t.len) {
-                    const codepoint_length = try std.unicode.utf8ByteSequenceLength(t[i]);
-                    // TODO: check this earlier?
-                    if (i + codepoint_length > t.len) return error.InvalidUTF8;
-                    switch (try std.unicode.utf8Decode(t[i..][0..codepoint_length])) {
-                        unicode.ELLIPSES => try html_writer.writeAll("&hellip;"),
-                        unicode.EN_DASH => try html_writer.writeAll("&ndash;"),
-                        unicode.EM_DASH => try html_writer.writeAll("&mdash;"),
-                        unicode.LEFT_DOUBLE_QUOTE => try html_writer.writeAll("&ldquo;"),
-                        unicode.RIGHT_DOUBLE_QUOTE => try html_writer.writeAll("&rdquo;"),
-                        unicode.LEFT_SINGLE_QUOTE => try html_writer.writeAll("&lsquo;"),
-                        unicode.RIGHT_SINGLE_QUOTE => try html_writer.writeAll("&rsquo;"),
-                        else => try html_writer.writeAll(t[i..][0..codepoint_length]),
-                    }
-                    i += codepoint_length;
-                }
-            },
+            => try html.writeEscaped(doc.asText(event_index), html_writer),
 
-            .character => {
-                const c = doc.events.items(.data)[event_index].character;
-                // TODO: check this earlier?
-                switch (c) {
-                    unicode.ELLIPSES => try html_writer.writeAll("&hellip;"),
-                    unicode.EN_DASH => try html_writer.writeAll("&ndash;"),
-                    unicode.EM_DASH => try html_writer.writeAll("&mdash;"),
-                    unicode.LEFT_DOUBLE_QUOTE => try html_writer.writeAll("&ldquo;"),
-                    unicode.RIGHT_DOUBLE_QUOTE => try html_writer.writeAll("&rdquo;"),
-                    unicode.LEFT_SINGLE_QUOTE => try html_writer.writeAll("&lsquo;"),
-                    unicode.RIGHT_SINGLE_QUOTE => try html_writer.writeAll("&rsquo;"),
-                    else => {
-                        var buf: [4]u8 = undefined;
-                        const nbytes = try std.unicode.utf8Encode(c, &buf);
-                        try html_writer.writeAll(buf[0..nbytes]);
-                    },
-                }
-            },
+            .character => try html.writeUTF8CharEscaped(doc.events.items(.data)[event_index].character, html_writer),
 
             .autolink => {
                 const url = doc.asText(event_index);
