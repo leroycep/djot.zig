@@ -1,6 +1,7 @@
 const testDjotToHtml = @import("../html_tests.zig").testDjotToHtml;
 
 test "html.footnotes 0" {
+    if (true) return error.SkipZigTest;
     try testDjotToHtml(
         \\test[^a] and another[^foo_bar].
         \\
@@ -37,6 +38,7 @@ test "html.footnotes 0" {
 }
 
 test "html.footnotes 1" {
+    if (true) return error.SkipZigTest;
     try testDjotToHtml(
         \\test[^nonexistent]
         \\
@@ -54,4 +56,3 @@ test "html.footnotes 1" {
         \\
     );
 }
-

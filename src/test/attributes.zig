@@ -1,6 +1,7 @@
 const testDjotToHtml = @import("../html_tests.zig").testDjotToHtml;
 
 test "html.attributes 0" {
+    if (true) return error.SkipZigTest;
     try testDjotToHtml(
         \\a *b{#id key="*"}*
         \\
@@ -11,6 +12,7 @@ test "html.attributes 0" {
 }
 
 test "html.attributes 1" {
+    if (true) return error.SkipZigTest;
     try testDjotToHtml(
         \\a *b{#id key="*"}o
         \\
@@ -21,6 +23,7 @@ test "html.attributes 1" {
 }
 
 test "html.attributes 2" {
+    if (true) return error.SkipZigTest;
     try testDjotToHtml(
         \\hi{key="{#hi"}
         \\
@@ -31,6 +34,7 @@ test "html.attributes 2" {
 }
 
 test "html.attributes 3" {
+    if (true) return error.SkipZigTest;
     try testDjotToHtml(
         \\hi\{key="abc{#hi}"
         \\
@@ -41,6 +45,7 @@ test "html.attributes 3" {
 }
 
 test "html.attributes 4" {
+    if (true) return error.SkipZigTest;
     try testDjotToHtml(
         \\hi{key="\{#hi"}
         \\
@@ -51,6 +56,7 @@ test "html.attributes 4" {
 }
 
 test "html.attributes 5" {
+    if (true) return error.SkipZigTest;
     try testDjotToHtml(
         \\hi{#id .class
         \\key="value"}
@@ -62,6 +68,7 @@ test "html.attributes 5" {
 }
 
 test "html.attributes 6" {
+    if (true) return error.SkipZigTest;
     try testDjotToHtml(
         \\{#id} at beginning
         \\
@@ -72,6 +79,7 @@ test "html.attributes 6" {
 }
 
 test "html.attributes 7" {
+    if (true) return error.SkipZigTest;
     try testDjotToHtml(
         \\After {#id} space
         \\{.class}
@@ -84,6 +92,7 @@ test "html.attributes 7" {
 }
 
 test "html.attributes 8" {
+    if (true) return error.SkipZigTest;
     try testDjotToHtml(
         \\{#id .class}
         \\A paragraph
@@ -95,6 +104,7 @@ test "html.attributes 8" {
 }
 
 test "html.attributes 9" {
+    if (true) return error.SkipZigTest;
     try testDjotToHtml(
         \\{#id .class
         \\  style="color:red"}
@@ -117,6 +127,7 @@ test "html.attributes 10" {
 }
 
 test "html.attributes 11" {
+    if (true) return error.SkipZigTest;
     try testDjotToHtml(
         \\{#id}
         \\{key=val}
@@ -133,6 +144,7 @@ test "html.attributes 11" {
 }
 
 test "html.attributes 12" {
+    if (true) return error.SkipZigTest;
     try testDjotToHtml(
         \\{#id}
         \\> Block quote
@@ -146,6 +158,7 @@ test "html.attributes 12" {
 }
 
 test "html.attributes 13" {
+    if (true) return error.SkipZigTest;
     try testDjotToHtml(
         \\{#id}
         \\# Heading
@@ -157,6 +170,7 @@ test "html.attributes 13" {
 }
 
 test "html.attributes 14" {
+    if (true) return error.SkipZigTest;
     try testDjotToHtml(
         \\{.blue}
         \\- - - - -
@@ -168,6 +182,7 @@ test "html.attributes 14" {
 }
 
 test "html.attributes 15" {
+    if (true) return error.SkipZigTest;
     try testDjotToHtml(
         \\{highlight=3}
         \\``` ruby
@@ -182,6 +197,7 @@ test "html.attributes 15" {
 }
 
 test "html.attributes 16" {
+    if (true) return error.SkipZigTest;
     try testDjotToHtml(
         \\{.special}
         \\1. one
@@ -201,6 +217,7 @@ test "html.attributes 16" {
 }
 
 test "html.attributes 17" {
+    if (true) return error.SkipZigTest;
     try testDjotToHtml(
         \\> {.foo}
         \\> > {.bar}
@@ -217,6 +234,7 @@ test "html.attributes 17" {
 }
 
 test "html.attributes 18" {
+    if (true) return error.SkipZigTest;
     try testDjotToHtml(
         \\foo{#ident % this is a comment % .class}
         \\
@@ -227,6 +245,7 @@ test "html.attributes 18" {
 }
 
 test "html.attributes 19" {
+    if (true) return error.SkipZigTest;
     try testDjotToHtml(
         \\{% This is  a comment before a
         \\  block-level item. %}
@@ -237,4 +256,3 @@ test "html.attributes 19" {
         \\
     );
 }
-

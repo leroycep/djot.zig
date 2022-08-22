@@ -1,6 +1,7 @@
 const testDjotToHtml = @import("../html_tests.zig").testDjotToHtml;
 
 test "html.super-subscript 0" {
+    if (true) return error.SkipZigTest;
     try testDjotToHtml(
         \\H~2~O
         \\
@@ -11,6 +12,7 @@ test "html.super-subscript 0" {
 }
 
 test "html.super-subscript 1" {
+    if (true) return error.SkipZigTest;
     try testDjotToHtml(
         \\mc^2^
         \\
@@ -21,6 +23,7 @@ test "html.super-subscript 1" {
 }
 
 test "html.super-subscript 2" {
+    if (true) return error.SkipZigTest;
     try testDjotToHtml(
         \\test^of superscript ~with subscript~^
         \\
@@ -31,6 +34,7 @@ test "html.super-subscript 2" {
 }
 
 test "html.super-subscript 3" {
+    if (true) return error.SkipZigTest;
     try testDjotToHtml(
         \\H{~2 ~}O
         \\
@@ -39,4 +43,3 @@ test "html.super-subscript 3" {
         \\
     );
 }
-

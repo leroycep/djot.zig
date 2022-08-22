@@ -1,6 +1,7 @@
 const testDjotToHtml = @import("../html_tests.zig").testDjotToHtml;
 
 test "html.insert-delete-mark 0" {
+    if (true) return error.SkipZigTest;
     try testDjotToHtml(
         \\This is {-deleted
         \\_text_-}. The braces are -required-.
@@ -15,6 +16,7 @@ test "html.insert-delete-mark 0" {
 }
 
 test "html.insert-delete-mark 1" {
+    if (true) return error.SkipZigTest;
     try testDjotToHtml(
         \\{+ Inserted text +}
         \\
@@ -25,6 +27,7 @@ test "html.insert-delete-mark 1" {
 }
 
 test "html.insert-delete-mark 2" {
+    if (true) return error.SkipZigTest;
     try testDjotToHtml(
         \\{--hello--}
         \\
@@ -35,6 +38,7 @@ test "html.insert-delete-mark 2" {
 }
 
 test "html.insert-delete-mark 3" {
+    if (true) return error.SkipZigTest;
     try testDjotToHtml(
         \\This is {=marked *text*=}.
         \\
@@ -43,4 +47,3 @@ test "html.insert-delete-mark 3" {
         \\
     );
 }
-

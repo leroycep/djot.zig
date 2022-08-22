@@ -1,6 +1,7 @@
 const testDjotToHtml = @import("../html_tests.zig").testDjotToHtml;
 
 test "html.raw 0" {
+    if (true) return error.SkipZigTest;
     try testDjotToHtml(
         \\`<a>`{=html}
         \\
@@ -11,6 +12,7 @@ test "html.raw 0" {
 }
 
 test "html.raw 1" {
+    if (true) return error.SkipZigTest;
     try testDjotToHtml(
         \\``` =html
         \\<table>
@@ -23,6 +25,7 @@ test "html.raw 1" {
 }
 
 test "html.raw 2" {
+    if (true) return error.SkipZigTest;
     try testDjotToHtml(
         \\`<b>foo</b>`{=html #id}
         \\```
@@ -35,6 +38,7 @@ test "html.raw 2" {
 }
 
 test "html.raw 3" {
+    if (true) return error.SkipZigTest;
     try testDjotToHtml(
         \\{.foo}
         \\``` =html
@@ -46,4 +50,3 @@ test "html.raw 3" {
         \\
     );
 }
-

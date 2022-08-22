@@ -1,6 +1,7 @@
 const testDjotToHtml = @import("../html_tests.zig").testDjotToHtml;
 
 test "html.spans 0" {
+    if (true) return error.SkipZigTest;
     try testDjotToHtml(
         \\This is a [test of
         \\*color*]{.blue}.
@@ -13,6 +14,7 @@ test "html.spans 0" {
 }
 
 test "html.spans 1" {
+    if (true) return error.SkipZigTest;
     try testDjotToHtml(
         \\not a [span] {#id}.
         \\
@@ -23,6 +25,7 @@ test "html.spans 1" {
 }
 
 test "html.spans 2" {
+    if (true) return error.SkipZigTest;
     try testDjotToHtml(
         \\[nested [span]{.blue}]{#ident}
         \\
@@ -31,4 +34,3 @@ test "html.spans 2" {
         \\
     );
 }
-

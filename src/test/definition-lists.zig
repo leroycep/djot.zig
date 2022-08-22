@@ -1,6 +1,7 @@
 const testDjotToHtml = @import("../html_tests.zig").testDjotToHtml;
 
 test "html.definition-lists 0" {
+    if (true) return error.SkipZigTest;
     try testDjotToHtml(
         \\: apple
         \\
@@ -25,6 +26,7 @@ test "html.definition-lists 0" {
 }
 
 test "html.definition-lists 1" {
+    if (true) return error.SkipZigTest;
     try testDjotToHtml(
         \\: apple
         \\
@@ -50,6 +52,7 @@ test "html.definition-lists 1" {
 }
 
 test "html.definition-lists 2" {
+    if (true) return error.SkipZigTest;
     try testDjotToHtml(
         \\: apple
         \\ fruit
@@ -86,6 +89,7 @@ test "html.definition-lists 2" {
 }
 
 test "html.definition-lists 3" {
+    if (true) return error.SkipZigTest;
     try testDjotToHtml(
         \\: ```
         \\  ok
@@ -102,4 +106,3 @@ test "html.definition-lists 3" {
         \\
     );
 }
-

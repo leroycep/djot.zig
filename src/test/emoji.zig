@@ -1,6 +1,7 @@
 const testDjotToHtml = @import("../html_tests.zig").testDjotToHtml;
 
 test "html.emoji 0" {
+    if (true) return error.SkipZigTest;
     try testDjotToHtml(
         \\:+1: :scream:
         \\
@@ -29,4 +30,3 @@ test "html.emoji 2" {
         \\
     );
 }
-

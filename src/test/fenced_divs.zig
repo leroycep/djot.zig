@@ -1,6 +1,7 @@
 const testDjotToHtml = @import("../html_tests.zig").testDjotToHtml;
 
 test "html.fenced_divs 0" {
+    if (true) return error.SkipZigTest;
     try testDjotToHtml(
         \\:::::::::: foo
         \\Hi
@@ -20,6 +21,7 @@ test "html.fenced_divs 0" {
 }
 
 test "html.fenced_divs 1" {
+    if (true) return error.SkipZigTest;
     try testDjotToHtml(
         \\{#bar .foo}
         \\:::
@@ -40,6 +42,7 @@ test "html.fenced_divs 1" {
 }
 
 test "html.fenced_divs 2" {
+    if (true) return error.SkipZigTest;
     try testDjotToHtml(
         \\{#bar .foo}
         \\::::
@@ -64,6 +67,7 @@ test "html.fenced_divs 2" {
 }
 
 test "html.fenced_divs 3" {
+    if (true) return error.SkipZigTest;
     try testDjotToHtml(
         \\Paragraph text
         \\::::
@@ -80,6 +84,7 @@ test "html.fenced_divs 3" {
 }
 
 test "html.fenced_divs 4" {
+    if (true) return error.SkipZigTest;
     try testDjotToHtml(
         \\::::
         \\Hi
@@ -94,6 +99,7 @@ test "html.fenced_divs 4" {
 }
 
 test "html.fenced_divs 5" {
+    if (true) return error.SkipZigTest;
     try testDjotToHtml(
         \\::::::::: foo
         \\Hi
@@ -109,6 +115,7 @@ test "html.fenced_divs 5" {
 }
 
 test "html.fenced_divs 6" {
+    if (true) return error.SkipZigTest;
     try testDjotToHtml(
         \\> :::: foo
         \\> Hi
@@ -122,4 +129,3 @@ test "html.fenced_divs 6" {
         \\
     );
 }
-

@@ -1,6 +1,7 @@
 const testDjotToHtml = @import("../html_tests.zig").testDjotToHtml;
 
 test "html.smart 0" {
+    if (true) return error.SkipZigTest;
     try testDjotToHtml(
         \\"Hello," said the spider.
         \\"'Shelob' is my name."
@@ -13,6 +14,7 @@ test "html.smart 0" {
 }
 
 test "html.smart 1" {
+    if (true) return error.SkipZigTest;
     try testDjotToHtml(
         \\'A', 'B', and 'C' are letters.
         \\
@@ -23,6 +25,7 @@ test "html.smart 1" {
 }
 
 test "html.smart 2" {
+    if (true) return error.SkipZigTest;
     try testDjotToHtml(
         \\'Oak,' 'elm,' and 'beech' are names of trees.
         \\So is 'pine.'
@@ -35,6 +38,7 @@ test "html.smart 2" {
 }
 
 test "html.smart 3" {
+    if (true) return error.SkipZigTest;
     try testDjotToHtml(
         \\'He said, "I want to go."'
         \\
@@ -45,6 +49,7 @@ test "html.smart 3" {
 }
 
 test "html.smart 4" {
+    if (true) return error.SkipZigTest;
     try testDjotToHtml(
         \\Were you alive in the '70s?
         \\
@@ -55,6 +60,7 @@ test "html.smart 4" {
 }
 
 test "html.smart 5" {
+    if (true) return error.SkipZigTest;
     try testDjotToHtml(
         \\Here is some quoted '`code`' and a "[quoted link](url)".
         \\
@@ -65,6 +71,7 @@ test "html.smart 5" {
 }
 
 test "html.smart 6" {
+    if (true) return error.SkipZigTest;
     try testDjotToHtml(
         \\'tis the season to be 'jolly'
         \\
@@ -75,6 +82,7 @@ test "html.smart 6" {
 }
 
 test "html.smart 7" {
+    if (true) return error.SkipZigTest;
     try testDjotToHtml(
         \\'We'll use Jane's boat and John's truck,' Jenna said.
         \\
@@ -85,6 +93,7 @@ test "html.smart 7" {
 }
 
 test "html.smart 8" {
+    if (true) return error.SkipZigTest;
     try testDjotToHtml(
         \\"A paragraph with no closing quote.
         \\
@@ -98,6 +107,7 @@ test "html.smart 8" {
 }
 
 test "html.smart 9" {
+    if (true) return error.SkipZigTest;
     try testDjotToHtml(
         \\[a]'s b'
         \\
@@ -122,6 +132,7 @@ test "html.smart 10" {
 }
 
 test "html.smart 11" {
+    if (true) return error.SkipZigTest;
     try testDjotToHtml(
         \\''hi''
         \\
@@ -132,6 +143,7 @@ test "html.smart 11" {
 }
 
 test "html.smart 12" {
+    if (true) return error.SkipZigTest;
     try testDjotToHtml(
         \\{''}hi{''}
         \\
@@ -216,4 +228,3 @@ test "html.smart 17" {
         \\
     );
 }
-
