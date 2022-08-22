@@ -78,6 +78,10 @@ pub fn parseBlock(parent_events: *djot.EventCursor, parent_tokens: *djot.TokCurs
             break :blk;
         }
 
+        if (try parsePipeTable(&events, &tokens, prefix)) |_| {
+            break :blk;
+        }
+
         if (try parseParagraph(&events, &tokens, prefix)) |_| {
             break :blk;
         }
@@ -115,6 +119,58 @@ pub fn parseNewlinePrefix(parent_tokens: *djot.TokCursor, prefix: ?*const Prefix
 
     parent_tokens.* = tokens;
     return was_newline;
+}
+
+pub fn parsePipeTable(parent_events: *djot.EventCursor, parent_tokens: *djot.TokCursor, prefix: ?*const Prefix) djot.Error!?void {
+    var tokens = parent_tokens.*;
+    var events = parent_events.*;
+
+    _ = try events.append(.start_table);
+
+    _ = (try parsePipeTableRow(&events, &tokens, prefix)) orelse return null;
+
+    while (true) {
+        (try parsePipeTableRow(&events, &tokens, prefix)) orelse break;
+    }
+
+    _ = try events.append(.close_table);
+
+    parent_tokens.* = tokens;
+    parent_events.* = events;
+}
+
+pub fn parsePipeTableRow(parent_events: *djot.EventCursor, parent_tokens: *djot.TokCursor, prefix: ?*const Prefix) djot.Error!?void {
+    var tokens = parent_tokens.*;
+    var events = parent_events.*;
+
+    _ = try events.append(.start_table_row);
+
+    const open_pipe = tokens.expect(.pipe) orelse return null;
+    _ = try events.append(.start_table_cell);
+
+    while (tokens.expect(.space)) |_| {}
+
+    while (true) {
+        _ = try parseTextSpans(&events, &tokens, prefix, &.{ .tok = tokens.tokOf(open_pipe) });
+
+        while (tokens.expect(.space)) |_| {}
+
+        _ = tokens.expect(.pipe) orelse return null;
+
+        _ = try events.append(.close_table_cell);
+
+        while (tokens.expect(.space)) |_| {}
+        if (tokens.expectInList(&.{ .line_break, .eof })) |_| {
+            break;
+        }
+
+        _ = try events.append(.start_table_cell);
+    }
+
+    _ = try events.append(.close_table_row);
+
+    parent_tokens.* = tokens;
+    parent_events.* = events;
 }
 
 pub fn parseCodeBlock(parent_events: *djot.EventCursor, parent_tokens: *djot.TokCursor, prefix: ?*const Prefix) djot.Error!?void {
@@ -395,6 +451,10 @@ fn parseTextSpans(parent_events: *djot.EventCursor, parent_tokens: *djot.TokCurs
             lookahead = tokens;
         }
 
+        while (lookahead.expect(.space)) |space| {
+            _ = try lookahead_events.append(.{ .text = tokens.startOf(space) });
+        }
+
         _ = try parseTextSpan(&lookahead_events, &lookahead, prefix, opener) orelse break;
 
         tokens = lookahead;
@@ -533,6 +593,7 @@ fn parseTextSpan(parent_events: *djot.EventCursor, parent_tokens: *djot.TokCurso
         .close_asterisk,
         .close_underscore,
         .inline_link_url,
+        .pipe,
         => {
             if (opener) |o| {
                 if (o.isEnd(tokens, tokens.index)) {
@@ -822,6 +883,7 @@ fn parseTextSpanVerbatim(parent_events: *djot.EventCursor, parent_tokens: *djot.
             .upper_alpha,
             .lower_roman,
             .upper_roman,
+            .pipe,
             => {
                 _ = try events.append(.{ .text = tokens.startOf(tokens.index) });
                 tokens.index += 1;
@@ -905,6 +967,10 @@ const PrevOpener = struct {
             },
 
             .inline_link_url => if (this.tok.kind == .left_square) {
+                return true;
+            },
+
+            .pipe => if (this.tok.kind == .pipe) {
                 return true;
             },
 

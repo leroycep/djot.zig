@@ -48,6 +48,8 @@ pub const Kind = enum(u8) {
     colon,
     plus,
 
+    pipe,
+
     pub fn isAsterisk(this: @This()) bool {
         switch (this) {
             .asterisk,
@@ -263,6 +265,11 @@ pub fn parse(source: []const u8, start: usize) @This() {
                     res.end = index;
                     state = .lower_alpha;
                 },
+                '|' => {
+                    res.kind = .pipe;
+                    res.end = index;
+                    break;
+                },
                 else => {
                     res.kind = .text;
                     res.end = index;
@@ -292,7 +299,7 @@ pub fn parse(source: []const u8, start: usize) @This() {
             },
             .text_period1 => switch (c) {
                 '.' => state = .text_period2,
-                '`', '*', '_', '{', '\\', '!', '[', ']' => break,
+                '`', '*', '_', '{', '\\', '!', '[', ']', '|' => break,
 
                 ' ' => {
                     res.end = index;
@@ -310,7 +317,7 @@ pub fn parse(source: []const u8, start: usize) @This() {
             .text_period2 => switch (c) {
                 '.' => break,
 
-                '`', '*', '_', '{', '\\', '!', '[', ']' => break,
+                '`', '*', '_', '{', '\\', '!', '[', ']', '|' => break,
 
                 ' ' => state = .text_space,
                 '\n' => {
@@ -338,6 +345,7 @@ pub fn parse(source: []const u8, start: usize) @This() {
                 '[',
                 ']',
                 ')',
+                '|',
                 => break,
 
                 ' ' => {
@@ -362,6 +370,7 @@ pub fn parse(source: []const u8, start: usize) @This() {
                 '[',
                 ']',
                 ')',
+                '|',
                 => break,
 
                 ' ' => {},
@@ -379,7 +388,7 @@ pub fn parse(source: []const u8, start: usize) @This() {
             .text_hyphen => switch (c) {
                 '-' => break,
 
-                '`', '*', '_', '{', '\\', '!', '[', ']' => break,
+                '`', '*', '_', '{', '\\', '!', '[', ']', '|' => break,
 
                 ' ' => state = .text_space,
                 '\n' => {
@@ -430,11 +439,12 @@ pub fn parse(source: []const u8, start: usize) @This() {
                     res.end = index;
                     state = .lower_alpha;
                 },
-                ' ', 'A'...'Z', '0'...'9' => {
+                'A'...'Z', '0'...'9' => {
                     res.kind = .text;
                     res.end = index;
-                    state = .text_space;
+                    state = .text;
                 },
+                ' ' => state = .text_space,
                 else => break,
             },
             .upper_roman => switch (c) {
@@ -443,29 +453,32 @@ pub fn parse(source: []const u8, start: usize) @This() {
                     res.end = index;
                     state = .upper_alpha;
                 },
-                ' ', 'a'...'z', '0'...'9' => {
+                'a'...'z', '0'...'9' => {
                     res.kind = .text;
                     res.end = index;
                     state = .text_space;
                 },
+                ' ' => state = .text_space,
                 else => break,
             },
             .lower_alpha => switch (c) {
                 'a'...'z' => res.end = index,
-                ' ', 'A'...'Z', '0'...'9' => {
+                'A'...'Z', '0'...'9' => {
                     res.kind = .text;
                     res.end = index;
                     state = .text_space;
                 },
+                ' ' => state = .text_space,
                 else => break,
             },
             .upper_alpha => switch (c) {
                 'A'...'Z' => res.end = index,
-                ' ', 'a'...'z', '0'...'9' => {
+                'a'...'z', '0'...'9' => {
                     res.kind = .text;
                     res.end = index;
                     state = .text_space;
                 },
+                ' ' => state = .text_space,
                 else => break,
             },
             .lcurl => switch (c) {

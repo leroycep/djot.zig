@@ -286,6 +286,13 @@ const TestEvent = union(djot.Event.Kind) {
     start_code_language: []const u8,
     close_code_language: []const u8,
 
+    start_table,
+    close_table,
+    start_table_row,
+    close_table_row,
+    start_table_cell,
+    close_table_cell,
+
     pub fn format(
         this: @This(),
         comptime fmt: []const u8,
@@ -340,6 +347,12 @@ const TestEvent = union(djot.Event.Kind) {
             .thematic_break,
             .start_code_block,
             .close_code_block,
+            .start_table,
+            .close_table,
+            .start_table_row,
+            .close_table_row,
+            .start_table_cell,
+            .close_table_cell,
             => {},
         }
     }

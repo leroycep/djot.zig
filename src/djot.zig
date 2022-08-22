@@ -129,6 +129,13 @@ pub fn toHtml(allocator: std.mem.Allocator, source: []const u8, html_writer: any
             .close_code_block => try html_writer.writeAll("</code></pre>\n"),
             .start_code_language => try html_writer.print("<pre><code class=\"language-{}\">", .{std.zig.fmtEscapes(doc.asText(event_index))}),
             .close_code_language => try html_writer.writeAll("</code></pre>\n"),
+
+            .start_table => try html_writer.writeAll("<table>\n"),
+            .close_table => try html_writer.writeAll("</table>\n"),
+            .start_table_row => try html_writer.writeAll("<tr>\n"),
+            .close_table_row => try html_writer.writeAll("</tr>\n"),
+            .start_table_cell => try html_writer.writeAll("<td>"),
+            .close_table_cell => try html_writer.writeAll("</td>\n"),
         }
     }
 }
@@ -254,6 +261,12 @@ pub const Document = struct {
                 .thematic_break,
                 .start_code_block,
                 .close_code_block,
+                .start_table,
+                .close_table,
+                .start_table_row,
+                .close_table_row,
+                .start_table_cell,
+                .close_table_cell,
                 => {},
             }
         }
@@ -309,6 +322,13 @@ pub const Event = union(Kind) {
     start_code_language: SourceIndex,
     close_code_language: SourceIndex,
 
+    start_table,
+    close_table,
+    start_table_row,
+    close_table_row,
+    start_table_cell,
+    close_table_cell,
+
     pub const List = struct {
         style: Marker.Style,
     };
@@ -361,6 +381,13 @@ pub const Event = union(Kind) {
         close_code_block,
         start_code_language,
         close_code_language,
+
+        start_table,
+        close_table,
+        start_table_row,
+        close_table_row,
+        start_table_cell,
+        close_table_cell,
     };
 };
 

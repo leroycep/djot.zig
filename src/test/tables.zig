@@ -1,7 +1,6 @@
 const testDjotToHtml = @import("../html_tests.zig").testDjotToHtml;
 
 test "html.tables 0" {
-    if (true) return error.SkipZigTest;
     try testDjotToHtml(
         \\| a |
         \\
