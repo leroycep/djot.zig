@@ -28,8 +28,9 @@ pub fn main() !void {
 
     const test_cases = try parseTestCases(gpa.allocator(), res.stderr);
     defer {
-        gpa.allocator().free(test_cases.other);
         gpa.allocator().free(test_cases.passed);
+        gpa.allocator().free(test_cases.skipped);
+        gpa.allocator().free(test_cases.failed);
     }
 
     var html_contents = std.ArrayList(u8).init(gpa.allocator());
@@ -45,28 +46,34 @@ pub fn main() !void {
     try out.print("</table>\n", .{});
 
     try out.print("<h2>Failing Test Cases</h2>\n", .{});
-    for (test_cases.other) |test_case| {
+    for (test_cases.failed) |test_case| {
         try out.print("<h3 id=\"", .{});
         try writeNameAsId(test_case.name, out);
         try out.print("\"><a href=\"#", .{});
         try writeNameAsId(test_case.name, out);
         try out.print("\">{}. {s}</a></h3>\n", .{ test_case.number, html.fmtEscapes(test_case.name) });
-        switch (test_case.result) {
-            .ok => try out.print("OK\n", .{}),
-            .err => |text| try out.print("<pre><code>{}</code></pre>\n", .{html.fmtEscapes(text)}),
-        }
+        try out.print("<pre><code>{}</code></pre>\n", .{html.fmtEscapes(test_case.result.err)});
     }
+
+    try out.print("<h2>Skipped Test Cases</h2>\n", .{});
+    try out.print("<ul>\n", .{});
+    for (test_cases.skipped) |test_case| {
+        try out.print("<li>{}. {s}</li>\n", .{ test_case.number, html.fmtEscapes(test_case.name) });
+    }
+    try out.print("</ul>\n", .{});
 
     try out.print("<h2>Passing Test Cases</h2>\n", .{});
+    try out.print("<ul>\n", .{});
     for (test_cases.passed) |test_case| {
-        try out.print("<h3>{}. {s}</h3>\n", .{ test_case.number, html.fmtEscapes(test_case.name) });
-        switch (test_case.result) {
-            .ok => try out.print("OK\n", .{}),
-            .err => |text| try out.print("<pre><code>{}</code></pre>\n", .{html.fmtEscapes(text)}),
-        }
+        try out.print("<li>{}. {s}</li>\n", .{ test_case.number, html.fmtEscapes(test_case.name) });
     }
+    try out.print("</ul>\n", .{});
 
     try std.fs.cwd().writeFile("zig-out/test-results.html", html_contents.items);
+
+    const path = try std.fs.realpathAlloc(gpa.allocator(), "zig-out/test-results.html");
+    defer gpa.allocator().free(path);
+    std.log.info("Wrote test results to file://{s}", .{path});
 }
 
 pub fn writeNameAsId(name: []const u8, writer: anytype) !void {
@@ -85,16 +92,20 @@ pub fn writeNameAsId(name: []const u8, writer: anytype) !void {
 
 const TestCases = struct {
     total: PassFailTotal,
-    other: []const TestCase,
     passed: []const TestCase,
+    skipped: []const TestCase,
+    failed: []const TestCase,
 };
 
 fn parseTestCases(allocator: std.mem.Allocator, source: []const u8) !TestCases {
-    var other = std.ArrayList(TestCase).init(allocator);
-    defer other.deinit();
-
     var passed = std.ArrayList(TestCase).init(allocator);
     defer passed.deinit();
+
+    var skipped = std.ArrayList(TestCase).init(allocator);
+    defer skipped.deinit();
+
+    var failed = std.ArrayList(TestCase).init(allocator);
+    defer failed.deinit();
 
     var cursor = Read{ .source = source, .index = 0 };
 
@@ -102,14 +113,16 @@ fn parseTestCases(allocator: std.mem.Allocator, source: []const u8) !TestCases {
         if (parsePassFailTotals(&cursor)) |total| {
             return TestCases{
                 .total = total,
-                .other = other.toOwnedSlice(),
                 .passed = passed.toOwnedSlice(),
+                .skipped = skipped.toOwnedSlice(),
+                .failed = failed.toOwnedSlice(),
             };
         }
         if (parseTestCase(&cursor)) |test_case| {
             switch (test_case.result) {
                 .ok => try passed.append(test_case),
-                .err => try other.append(test_case),
+                .skip => try skipped.append(test_case),
+                .err => try failed.append(test_case),
             }
             continue;
         }
@@ -127,6 +140,7 @@ const TestCase = struct {
 
     const Result = union(enum) {
         ok,
+        skip,
         err: []const u8,
     };
 };
@@ -143,6 +157,13 @@ fn parseTestCase(parent: *Read) ?TestCase {
             .number = header.number,
             .name = header.name,
             .result = .ok,
+        };
+    } else if (cursor.expectString("SKIP\n")) |_| {
+        parent.* = cursor;
+        return TestCase{
+            .number = header.number,
+            .name = header.name,
+            .result = .skip,
         };
     }
 
