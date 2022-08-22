@@ -69,11 +69,11 @@ pub fn toHtml(allocator: std.mem.Allocator, source: []const u8, html_writer: any
             .start_heading => try html_writer.print("<h{}>", .{doc.events.items(.data)[event_index].start_heading}),
             .close_heading => try html_writer.print("</h{}>", .{doc.events.items(.data)[event_index].close_heading}),
 
-            .start_list => try html_writer.writeAll("<ul>"),
+            .start_list => try html_writer.writeAll("<ul>\n"),
             .close_list => try html_writer.writeAll("</ul>\n"),
 
-            .start_list_item => try html_writer.writeAll("<li>"),
-            .close_list_item => try html_writer.writeAll("</li>"),
+            .start_list_item => try html_writer.writeAll("<li>\n"),
+            .close_list_item => try html_writer.writeAll("</li>\n"),
 
             .start_quote => try html_writer.writeAll("<quote>"),
             .close_quote => try html_writer.writeAll("</quote>"),

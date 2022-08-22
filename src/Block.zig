@@ -20,12 +20,12 @@ pub fn parseBlocks(parent_events: *djot.EventCursor, parent_tokens: *djot.TokCur
 
     while (tokens.tokens.items(.kind)[tokens.index] != .eof) {
         const was_break = parseNewlinePrefix(&tokens, prefix) orelse break;
-        if (was_break) {
-            tight = false;
-        }
 
         const next_block = (try parseBlock(&events, &tokens, prefix)) orelse break;
         if (!next_block.tight) {
+            tight = false;
+        }
+        if (was_break and !next_block.list) {
             tight = false;
         }
 
@@ -49,6 +49,7 @@ pub fn parseBlocks(parent_events: *djot.EventCursor, parent_tokens: *djot.TokCur
 
 pub const Block = struct {
     tight: bool,
+    list: bool,
 };
 
 pub fn parseBlock(parent_events: *djot.EventCursor, parent_tokens: *djot.TokCursor, prefix: ?*const Prefix) djot.Error!?Block {
@@ -75,6 +76,7 @@ pub fn parseBlock(parent_events: *djot.EventCursor, parent_tokens: *djot.TokCurs
         }
 
         if (try parseList(&events, &tokens, prefix)) |_| {
+            list = true;
             break :blk;
         }
 
@@ -91,7 +93,7 @@ pub fn parseBlock(parent_events: *djot.EventCursor, parent_tokens: *djot.TokCurs
 
     parent_tokens.* = tokens;
     parent_events.* = events;
-    return Block{ .tight = tight };
+    return Block{ .tight = tight, .list = list };
 }
 
 // Move past the prefix and any empty lines
@@ -361,7 +363,12 @@ fn parseList(parent_events: *djot.EventCursor, parent_tokens: *djot.TokCursor, p
         // Remove paragraph start and close events
         var next_index = start_event;
         for (events.events.items(.tag)[start_event..events.index]) |event_tag, offset| {
-            if (event_tag == .start_paragraph or event_tag == .close_paragraph) {
+            if (event_tag == .start_paragraph) {
+                continue;
+            }
+            if (event_tag == .close_paragraph) {
+                events.events.set(next_index, .{ .tag = .character, .data = .{ .character = '\n' } });
+                next_index += 1;
                 continue;
             }
             events.events.set(next_index, events.events.get(start_event + offset));

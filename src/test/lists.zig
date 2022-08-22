@@ -1,7 +1,6 @@
 const testDjotToHtml = @import("../html_tests.zig").testDjotToHtml;
 
 test "html.lists 0" {
-    if (true) return error.SkipZigTest;
     try testDjotToHtml(
         \\- one
         \\- two
@@ -20,7 +19,6 @@ test "html.lists 0" {
 }
 
 test "html.lists 1" {
-    if (true) return error.SkipZigTest;
     try testDjotToHtml(
         \\- one
         \\ - two
@@ -39,7 +37,6 @@ test "html.lists 1" {
 }
 
 test "html.lists 2" {
-    if (true) return error.SkipZigTest;
     try testDjotToHtml(
         \\- one
         \\
