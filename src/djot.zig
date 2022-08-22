@@ -75,8 +75,8 @@ pub fn toHtml(allocator: std.mem.Allocator, source: []const u8, html_writer: any
             .start_list_item => try html_writer.writeAll("<li>\n"),
             .close_list_item => try html_writer.writeAll("</li>\n"),
 
-            .start_quote => try html_writer.writeAll("<quote>"),
-            .close_quote => try html_writer.writeAll("</quote>"),
+            .start_quote => try html_writer.writeAll("<blockquote>\n"),
+            .close_quote => try html_writer.writeAll("</blockquote>\n"),
 
             .start_verbatim => try html_writer.writeAll("<code>"),
             .close_verbatim => try html_writer.writeAll("</code>"),

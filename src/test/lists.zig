@@ -65,7 +65,6 @@ test "html.lists 2" {
 }
 
 test "html.lists 3" {
-    if (true) return error.SkipZigTest;
     try testDjotToHtml(
         \\- one
         \\  and

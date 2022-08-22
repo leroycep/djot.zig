@@ -57,8 +57,55 @@ pub fn parseBlock(parent_events: *djot.EventCursor, parent_tokens: *djot.TokCurs
     var tokens = parent_tokens.*;
 
     var tight = true;
+    var list = false;
 
     blk: {
+        switch (tokens.kindOf(tokens.index)) {
+            .hyphen,
+            .asterisk,
+            => if (try parseThematicBreak(&events, &tokens)) |_| {
+                break :blk;
+            } else if (try parseList(&events, &tokens, prefix)) |_| {
+                list = true;
+                break :blk;
+            },
+
+            .plus,
+            .digits,
+            .lower_alpha,
+            .upper_alpha,
+            .lower_roman,
+            .upper_roman,
+            => if (try parseList(&events, &tokens, prefix)) |_| {
+                list = true;
+                break :blk;
+            },
+
+            .heading => if (try parseHeading(&events, &tokens, prefix)) |_| {
+                break :blk;
+            },
+
+            .ticks,
+            .tildes,
+            => if (try parseCodeBlock(&events, &tokens, prefix)) |_| {
+                break :blk;
+            },
+
+            .right_angle => if (try parseQuote(&events, &tokens, prefix)) |_| {
+                break :blk;
+            },
+
+            .pipe => if (try parsePipeTable(&events, &tokens, prefix)) |_| {
+                break :blk;
+            },
+
+            .space => if (try parseIndentBlock(&events, &tokens, prefix)) |_| {
+                break :blk;
+            },
+
+            else => {},
+        }
+
         if (try parseThematicBreak(&events, &tokens)) |_| {
             break :blk;
         }
@@ -94,6 +141,18 @@ pub fn parseBlock(parent_events: *djot.EventCursor, parent_tokens: *djot.TokCurs
     parent_tokens.* = tokens;
     parent_events.* = events;
     return Block{ .tight = tight, .list = list };
+}
+
+pub fn parseIndentBlock(parent_events: *djot.EventCursor, parent_tokens: *djot.TokCursor, prefix: ?*const Prefix) djot.Error!?void {
+    var events = parent_events.*;
+    var tokens = parent_tokens.*;
+
+    _ = tokens.expect(.space) orelse return null;
+
+    _ = (try parseBlocks(&events, &tokens, &.{ .prev = prefix, .token = .space })) orelse return null;
+
+    parent_events.* = events;
+    parent_tokens.* = tokens;
 }
 
 // Move past the prefix and any empty lines

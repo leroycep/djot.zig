@@ -1,7 +1,6 @@
 const testDjotToHtml = @import("../html_tests.zig").testDjotToHtml;
 
 test "html.blockquote 0" {
-    if (true) return error.SkipZigTest;
     try testDjotToHtml(
         \\> Basic
         \\> block _quote_.
@@ -16,7 +15,6 @@ test "html.blockquote 0" {
 }
 
 test "html.blockquote 1" {
-    if (true) return error.SkipZigTest;
     try testDjotToHtml(
         \\> Lazy
         \\block _quote_.
@@ -31,7 +29,6 @@ test "html.blockquote 1" {
 }
 
 test "html.blockquote 2" {
-    if (true) return error.SkipZigTest;
     try testDjotToHtml(
         \\> block
         \\>
@@ -47,7 +44,6 @@ test "html.blockquote 2" {
 }
 
 test "html.blockquote 3" {
-    if (true) return error.SkipZigTest;
     try testDjotToHtml(
         \\> block
         \\
@@ -65,7 +61,6 @@ test "html.blockquote 3" {
 }
 
 test "html.blockquote 4" {
-    if (true) return error.SkipZigTest;
     try testDjotToHtml(
         \\> > > nested
         \\
@@ -120,7 +115,6 @@ test "html.blockquote 6" {
 }
 
 test "html.blockquote 7" {
-    if (true) return error.SkipZigTest;
     try testDjotToHtml(
         \\> nested
         \\>
@@ -138,7 +132,6 @@ test "html.blockquote 7" {
 }
 
 test "html.blockquote 8" {
-    if (true) return error.SkipZigTest;
     try testDjotToHtml(
         \\>not blockquote
         \\
@@ -149,7 +142,6 @@ test "html.blockquote 8" {
 }
 
 test "html.blockquote 9" {
-    if (true) return error.SkipZigTest;
     try testDjotToHtml(
         \\>> not blockquote
         \\
@@ -200,7 +192,6 @@ test "html.blockquote 12" {
 }
 
 test "html.blockquote 13" {
-    if (true) return error.SkipZigTest;
     try testDjotToHtml(
         \\aaa
         \\> bbb
@@ -213,7 +204,6 @@ test "html.blockquote 13" {
 }
 
 test "html.blockquote 14" {
-    if (true) return error.SkipZigTest;
     try testDjotToHtml(
         \\aaa
         \\
