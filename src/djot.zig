@@ -79,6 +79,9 @@ pub fn toHtml(allocator: std.mem.Allocator, source: []const u8, html_writer: any
                 try html_writer.writeAll("</a>");
             },
 
+            .start_link_undefined => try html_writer.writeAll("<a href=\"#\">"),
+            .close_link_undefined => try html_writer.writeAll("</a>"),
+
             .start_image_link => {
                 try html_writer.writeAll("<img alt=\"");
                 in_alt_text += 1;
@@ -217,6 +220,8 @@ pub const Document = struct {
                 .close_link,
                 .start_image_link,
                 .close_image_link,
+                .start_link_undefined,
+                .close_link_undefined,
                 .start_code_language,
                 .close_code_language,
                 => |_| try writer.print(" \"{}\"", .{std.zig.fmtEscapes(this.document.asText(this.event_index))}),
@@ -293,6 +298,10 @@ pub const Event = union(Kind) {
     start_image_link: SourceIndex,
     close_image_link: SourceIndex,
 
+    // A reference link, where the reference was never defined
+    start_link_undefined: SourceIndex,
+    close_link_undefined: SourceIndex,
+
     thematic_break,
 
     start_code_block,
@@ -342,6 +351,9 @@ pub const Event = union(Kind) {
 
         start_image_link,
         close_image_link,
+
+        start_link_undefined,
+        close_link_undefined,
 
         thematic_break,
 

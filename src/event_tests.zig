@@ -276,6 +276,8 @@ const TestEvent = union(djot.Event.Kind) {
     close_link: []const u8,
     start_image_link: []const u8,
     close_image_link: []const u8,
+    start_link_undefined: []const u8,
+    close_link_undefined: []const u8,
 
     thematic_break,
 
@@ -304,6 +306,8 @@ const TestEvent = union(djot.Event.Kind) {
             .close_link,
             .start_image_link,
             .close_image_link,
+            .start_link_undefined,
+            .close_link_undefined,
             .start_code_language,
             .close_code_language,
             => |text| try writer.print(" \"{}\"", .{std.zig.fmtEscapes(text)}),

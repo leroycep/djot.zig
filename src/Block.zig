@@ -614,11 +614,46 @@ fn parseInlineLink(parent_events: *djot.EventCursor, parent_tokens: *djot.TokCur
             tokens.index += 1;
         },
 
+        .left_square => {
+            const link_reference = parseInlineLinkReferenceText(&tokens) orelse return null;
+
+            events.set(start_event, .{ .start_link_undefined = link_reference.start });
+            _ = try events.append(.{ .close_link_undefined = link_reference.start });
+        },
+
         else => return null,
     }
 
     parent_tokens.* = tokens;
     parent_events.* = events;
+}
+
+const LinkReferenceText = struct {
+    start: u32,
+    end: u32,
+};
+
+fn parseInlineLinkReferenceText(parent_tokens: *djot.TokCursor) ?LinkReferenceText {
+    var tokens = parent_tokens.*;
+
+    _ = tokens.expect(.left_square) orelse return null;
+
+    const start = tokens.startOf(tokens.index);
+
+    while (true) {
+        switch (tokens.kindOf(tokens.index)) {
+            .eof => return null,
+            .right_square => break,
+            else => tokens.index += 1,
+        }
+    }
+
+    const end = tokens.endOf(tokens.index);
+
+    _ = tokens.expect(.right_square) orelse return null;
+
+    parent_tokens.* = tokens;
+    return LinkReferenceText{ .start = start, .end = end };
 }
 
 fn parseInlineFormatting(parent_events: *djot.EventCursor, parent_tokens: *djot.TokCursor, prefix: ?*const Prefix, prev_opener: ?*const PrevOpener) djot.Error!?void {
