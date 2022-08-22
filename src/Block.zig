@@ -177,7 +177,7 @@ pub fn parseCodeBlock(parent_events: *djot.EventCursor, parent_tokens: *djot.Tok
     var tokens = parent_tokens.*;
     var events = parent_events.*;
 
-    const fence = tokens.expect(.ticks) orelse return null;
+    const fence = tokens.expectInList(&.{ .ticks, .tildes }) orelse return null;
     const fence_token = tokens.token(fence);
     const num_start_ticks = fence_token.end - fence_token.start;
     if (num_start_ticks < 3) {
@@ -185,7 +185,14 @@ pub fn parseCodeBlock(parent_events: *djot.EventCursor, parent_tokens: *djot.Tok
     }
 
     while (tokens.expect(.space)) |_| {}
-    const language_or_null = tokens.expect(.text);
+    const language_or_null = tokens.expectInList(&.{
+        .digits,
+        .lower_alpha,
+        .upper_alpha,
+        .lower_roman,
+        .upper_roman,
+        .text,
+    });
     while (tokens.expect(.space)) |_| {}
     _ = tokens.expect(.line_break) orelse return null;
 
@@ -204,11 +211,13 @@ pub fn parseCodeBlock(parent_events: *djot.EventCursor, parent_tokens: *djot.Tok
     while (tokens.current()) |tok| : (tokens.index += 1) {
         switch (tok.kind) {
             .eof => break,
-            .ticks => if (was_newline) {
+            .ticks,
+            .tildes,
+            => if (was_newline) {
                 // Check if the number of ticks is >= the starting fence
                 const token = tokens.token(fence);
                 const num_these_ticks = token.end - token.start;
-                if (num_these_ticks >= num_start_ticks) {
+                if (token.kind == fence_token.kind and num_these_ticks >= num_start_ticks) {
                     tokens.index += 1;
                     break;
                 }
@@ -563,6 +572,7 @@ fn parseTextSpan(parent_events: *djot.EventCursor, parent_tokens: *djot.TokCurso
         .upper_alpha,
         .lower_roman,
         .upper_roman,
+        .tildes,
         => {
             _ = try events.append(.{ .text = token.start });
             tokens.index += 1;
@@ -884,6 +894,8 @@ fn parseTextSpanVerbatim(parent_events: *djot.EventCursor, parent_tokens: *djot.
             .lower_roman,
             .upper_roman,
             .pipe,
+
+            .tildes,
             => {
                 _ = try events.append(.{ .text = tokens.startOf(tokens.index) });
                 tokens.index += 1;

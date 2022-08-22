@@ -27,6 +27,7 @@ pub const Kind = enum(u8) {
     right_paren,
 
     ticks,
+    tildes,
 
     asterisk,
     open_asterisk,
@@ -124,6 +125,7 @@ pub fn parse(source: []const u8, start: usize) @This() {
         upper_alpha,
 
         ticks,
+        tildes,
         lcurl,
         asterisk,
         underscore,
@@ -214,6 +216,11 @@ pub fn parse(source: []const u8, start: usize) @This() {
                     res.kind = .ticks;
                     res.end = index;
                     state = .ticks;
+                },
+                '~' => {
+                    res.kind = .tildes;
+                    res.end = index;
+                    state = .tildes;
                 },
                 '\\' => {
                     res.kind = .text;
@@ -402,6 +409,10 @@ pub fn parse(source: []const u8, start: usize) @This() {
             },
             .ticks => switch (c) {
                 '`' => res.end = index,
+                else => break,
+            },
+            .tildes => switch (c) {
+                '~' => res.end = index,
                 else => break,
             },
             .escape => switch (c) {

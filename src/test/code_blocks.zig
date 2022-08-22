@@ -1,7 +1,6 @@
 const testDjotToHtml = @import("../html_tests.zig").testDjotToHtml;
 
 test "html.code_blocks 0" {
-    if (true) return error.SkipZigTest;
     try testDjotToHtml(
         \\~~~
         \\code
@@ -17,7 +16,6 @@ test "html.code_blocks 0" {
 }
 
 test "html.code_blocks 1" {
-    if (true) return error.SkipZigTest;
     try testDjotToHtml(
         \\``` python
         \\x = y + 3
