@@ -1,6 +1,6 @@
 const std = @import("std");
 
-pub fn Read(T: type, Index: type) type {
+pub fn Read(comptime T: type, comptime Index: type) type {
     return struct {
         source: []const T,
         index: Index,
@@ -28,7 +28,7 @@ pub fn Read(T: type, Index: type) type {
 }
 
 pub const raw = struct {
-    pub fn next(T: type, I: type, source: []const T, index: *I) ?T {
+    pub fn next(comptime T: type, comptime I: type, source: []const T, index: *I) ?T {
         if (index.* < source.len) {
             const t = source[index.*];
             index.* += 1;
@@ -38,7 +38,7 @@ pub const raw = struct {
         }
     }
 
-    pub fn expect(T: type, I: type, source: []const T, parent: *I, expected: T) ?I {
+    pub fn expect(comptime T: type, comptime I: type, source: []const T, parent: *I, expected: T) ?I {
         const start = parent.*;
         var index = start;
         if (next(T, I, source, &index) == expected) {
@@ -48,7 +48,7 @@ pub const raw = struct {
         return null;
     }
 
-    pub fn expectInRange(T: type, I: type, source: []const T, parent: *I, low: T, high: T) ?I {
+    pub fn expectInRange(comptime T: type, comptime I: type, source: []const T, parent: *I, low: T, high: T) ?I {
         const start = parent.*;
         var index = start;
         const t = next(T, I, source, &index) orelse return null;
@@ -59,7 +59,7 @@ pub const raw = struct {
         return null;
     }
 
-    pub fn expectInList(T: type, I: type, source: []const T, parent: *I, list: []const T) ?I {
+    pub fn expectInList(comptime T: type, comptime I: type, source: []const T, parent: *I, list: []const T) ?I {
         const start = parent.*;
         var index = start;
         const t = next(T, I, source, &index) orelse return null;
@@ -70,7 +70,7 @@ pub const raw = struct {
         return null;
     }
 
-    pub fn expectString(T: type, I: type, source: []const T, parent_index: *I, string: []const T) ?[2]I {
+    pub fn expectString(comptime T: type, comptime I: type, source: []const T, parent_index: *I, string: []const T) ?[2]I {
         const start = parent_index.*;
         var index = parent_index.*;
 

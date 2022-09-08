@@ -408,7 +408,7 @@ pub const EventCursor = struct {
 
 // Takes a `union(enum)` and returns a struct with an untagged union and a
 // and a tag field.
-pub fn StructTaggedUnion(TaggedUnion: type) type {
+pub fn StructTaggedUnion(comptime TaggedUnion: type) type {
     std.debug.assert(std.meta.activeTag(@typeInfo(TaggedUnion)) == .Union);
     const tagged_union_info = @typeInfo(TaggedUnion).Union;
     std.debug.assert(tagged_union_info.tag_type != null);
