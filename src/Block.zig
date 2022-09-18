@@ -626,12 +626,12 @@ fn parseTextSpan(parent_events: *djot.EventCursor, parent_tokens: *djot.TokCurso
 
         .text,
         .right_angle,
-        .right_square,
         .heading,
         .nonbreaking_space,
         .space,
         .colon,
         .plus,
+        .left_paren,
         .right_paren,
         .digits,
         .lower_alpha,
@@ -670,6 +670,7 @@ fn parseTextSpan(parent_events: *djot.EventCursor, parent_tokens: *djot.TokCurso
         .close_underscore,
         .inline_link_url,
         .pipe,
+        .right_square,
         => {
             if (opener) |o| {
                 if (o.isEnd(tokens, tokens.index)) {
@@ -727,6 +728,20 @@ fn parseInlineImageLink(parent_events: *djot.EventCursor, parent_tokens: *djot.T
             tokens.index += 1;
         },
 
+        .right_square => {
+            tokens.index += 1;
+            if (parseInlineLinkReferenceText(&tokens, .left_square, .right_square)) |link_reference| {
+                // TODO
+                events.set(start_event, .{ .start_link_undefined = link_reference.start });
+                _ = try events.append(.{ .close_link_undefined = link_reference.start });
+            } else if (parseInlineLinkReferenceText(&tokens, .left_paren, .right_paren)) |link_reference| {
+                events.set(start_event, .{ .start_image_link = link_reference.start });
+                _ = try events.append(.{ .close_image_link = link_reference.start });
+            } else {
+                return null;
+            }
+        },
+
         else => return null,
     }
 
@@ -751,11 +766,17 @@ fn parseInlineLink(parent_events: *djot.EventCursor, parent_tokens: *djot.TokCur
             tokens.index += 1;
         },
 
-        .left_square => {
-            const link_reference = parseInlineLinkReferenceText(&tokens) orelse return null;
-
-            events.set(start_event, .{ .start_link_undefined = link_reference.start });
-            _ = try events.append(.{ .close_link_undefined = link_reference.start });
+        .right_square => {
+            tokens.index += 1;
+            if (parseInlineLinkReferenceText(&tokens, .left_square, .right_square)) |link_reference| {
+                events.set(start_event, .{ .start_link_undefined = link_reference.start });
+                _ = try events.append(.{ .close_link_undefined = link_reference.start });
+            } else if (parseInlineLinkReferenceText(&tokens, .left_paren, .right_paren)) |link_reference| {
+                events.set(start_event, .{ .start_link = link_reference.start });
+                _ = try events.append(.{ .close_link = link_reference.start });
+            } else {
+                return null;
+            }
         },
 
         else => return null,
@@ -770,24 +791,24 @@ const LinkReferenceText = struct {
     end: u32,
 };
 
-fn parseInlineLinkReferenceText(parent_tokens: *djot.TokCursor) ?LinkReferenceText {
+fn parseInlineLinkReferenceText(parent_tokens: *djot.TokCursor, start_kind: Token.Kind, close_kind: Token.Kind) ?LinkReferenceText {
     var tokens = parent_tokens.*;
 
-    _ = tokens.expect(.left_square) orelse return null;
+    _ = tokens.expect(start_kind) orelse return null;
 
     const start = tokens.startOf(tokens.index);
 
-    while (true) {
-        switch (tokens.kindOf(tokens.index)) {
-            .eof => return null,
-            .right_square => break,
-            else => tokens.index += 1,
+    while (tokens.kindOf(tokens.index) != .eof) : (tokens.index += 1) {
+        if (tokens.kindOf(tokens.index) == close_kind) {
+            break;
         }
+    } else {
+        return null;
     }
 
     const end = tokens.endOf(tokens.index);
 
-    _ = tokens.expect(.right_square) orelse return null;
+    _ = tokens.expect(close_kind) orelse return null;
 
     parent_tokens.* = tokens;
     return LinkReferenceText{ .start = start, .end = end };
@@ -952,6 +973,7 @@ fn parseTextSpanVerbatim(parent_events: *djot.EventCursor, parent_tokens: *djot.
             .period,
             .colon,
             .plus,
+            .left_paren,
             .right_paren,
 
             .digits,
@@ -1049,6 +1071,10 @@ const PrevOpener = struct {
             },
 
             .pipe => if (this.tok.kind == .pipe) {
+                return true;
+            },
+
+            .right_square => if (this.tok.kind == .left_square) {
                 return true;
             },
 

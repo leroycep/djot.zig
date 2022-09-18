@@ -155,7 +155,11 @@ pub const Document = struct {
             .close_image_link,
             => |source_index| {
                 const token = Token.parse(this.source, source_index);
-                return this.source[token.start + 2 .. token.end - 1];
+                if (token.kind == .inline_link_url) {
+                    return this.source[token.start + 2 .. token.end - 1];
+                } else {
+                    return this.source[token.start..token.end];
+                }
             },
 
             else => |ev| std.debug.panic("Event {s} does not have associated text", .{std.meta.tagName(ev)}),

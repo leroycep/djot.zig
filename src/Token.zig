@@ -24,6 +24,7 @@ pub const Kind = enum(u8) {
     right_angle,
     left_square,
     right_square,
+    left_paren,
     right_paren,
 
     ticks,
@@ -237,6 +238,11 @@ pub fn parse(source: []const u8, start: usize) @This() {
                     res.end = index;
                     break;
                 },
+                '(' => {
+                    res.kind = .left_paren;
+                    res.end = index;
+                    break;
+                },
                 ')' => {
                     res.kind = .right_paren;
                     res.end = index;
@@ -296,6 +302,7 @@ pub fn parse(source: []const u8, start: usize) @This() {
                 '!',
                 '[',
                 ']',
+                ')',
                 => break,
 
                 '.' => state = .text_period1,
@@ -306,7 +313,18 @@ pub fn parse(source: []const u8, start: usize) @This() {
             },
             .text_period1 => switch (c) {
                 '.' => state = .text_period2,
-                '`', '*', '_', '{', '\\', '!', '[', ']', '|' => break,
+
+                '`',
+                '*',
+                '_',
+                '{',
+                '\\',
+                '!',
+                '[',
+                ']',
+                '|',
+                ')',
+                => break,
 
                 ' ' => {
                     res.end = index;
@@ -324,7 +342,17 @@ pub fn parse(source: []const u8, start: usize) @This() {
             .text_period2 => switch (c) {
                 '.' => break,
 
-                '`', '*', '_', '{', '\\', '!', '[', ']', '|' => break,
+                '`',
+                '*',
+                '_',
+                '{',
+                '\\',
+                '!',
+                '[',
+                ']',
+                '|',
+                ')',
+                => break,
 
                 ' ' => state = .text_space,
                 '\n' => {
