@@ -404,6 +404,23 @@ pub const EventCursor = struct {
         return index;
     }
 
+    pub fn insert(this: *@This(), index: Index, event: Event) !Index {
+        try this.events.resize(this.allocator, this.index + 1);
+        this.index += 1;
+
+        var new_value = event;
+
+        var i = index;
+        while (i < this.events.len) : (i += 1) {
+            const current_value = this.events.get(i);
+            this.events.set(index, StructTaggedUnion(Event).fromUnion(new_value));
+
+            new_value = current_value.toUnion();
+        }
+
+        return index;
+    }
+
     pub fn set(this: *@This(), index: Index, event: Event) void {
         std.debug.assert(index < this.index);
         this.events.set(index, StructTaggedUnion(Event).fromUnion(event));

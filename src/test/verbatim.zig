@@ -53,7 +53,6 @@ test "html.verbatim 4" {
 }
 
 test "html.verbatim 5" {
-    if (true) return error.SkipZigTest;
     try testDjotToHtml(
         \\` ``a`` `
         \\

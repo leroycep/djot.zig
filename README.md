@@ -24,11 +24,11 @@ of djot, consider using the [official version implemented in Lua](https://github
 djot.zig uses the HTML test cases from the [official version implemented in Lua](https://github.com/jgm/djot/tree/47f9b3b3db91985180603ca5263ea2ec83d3e75d/test),
 and a couple other test cases taken from the [syntax description](https://htmlpreview.github.io/?https://github.com/jgm/djot/blob/master/doc/syntax.html).
 
-Test results as of 2022-08-19:
+Test results as of 2022-11-09:
 
 ```
-$ zig build -fno-stage1 test
-70 passed; 0 skipped; 165 failed.
+$ zig build test
+85 passed; 140 skipped; 0 failed.
 ```
 
 That's 70/235 test cases passing; or about 29% of the tests passing.

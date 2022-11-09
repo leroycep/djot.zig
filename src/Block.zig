@@ -922,11 +922,17 @@ fn parseTextSpanVerbatim(parent_events: *djot.EventCursor, parent_tokens: *djot.
     const opener = tokens.expect(.ticks) orelse return null;
     _ = try events.append(.start_verbatim);
 
+    var only_seen_spaces = true;
+    var was_space_that_should_be_removed = false;
+
     while (true) {
         switch (tokens.kindOf(tokens.index)) {
             .eof => break,
 
             .line_break => {
+                only_seen_spaces = false;
+                was_space_that_should_be_removed = false;
+
                 var lookahead = tokens;
                 lookahead.index += 1;
 
@@ -943,8 +949,17 @@ fn parseTextSpanVerbatim(parent_events: *djot.EventCursor, parent_tokens: *djot.
                 tokens.index += 1;
             },
 
+            .space => {
+                // TODO: Ensure these are the closing ticks
+                if (only_seen_spaces and tokens.kindOf(tokens.index + 1) == .ticks) {
+                    // skip adding space to output
+                } else {
+                    _ = try events.append(.{ .text = tokens.startOf(tokens.index) });
+                }
+                tokens.index += 1;
+            },
+
             .text,
-            .space,
             .right_angle,
             .left_square,
             .right_square,
@@ -985,20 +1000,33 @@ fn parseTextSpanVerbatim(parent_events: *djot.EventCursor, parent_tokens: *djot.
 
             .tildes,
             => {
+                only_seen_spaces = false;
+                was_space_that_should_be_removed = false;
+
                 _ = try events.append(.{ .text = tokens.startOf(tokens.index) });
                 tokens.index += 1;
             },
 
             .ticks => {
+                only_seen_spaces = false;
+
                 const opener_ticks = tokens.token(opener);
                 const these_ticks = tokens.token(tokens.index);
                 if (opener_ticks.end - opener_ticks.start == these_ticks.end - these_ticks.start) {
+                    if (was_space_that_should_be_removed) {
+                        events.index -= 1;
+                    }
                     tokens.index += 1;
                     break;
                 }
 
                 _ = try events.append(.{ .text = @intCast(u32, these_ticks.start) });
                 tokens.index += 1;
+
+                if (tokens.kindOf(tokens.index) == .space) {
+                    // Skip a space at the end
+                    was_space_that_should_be_removed = true;
+                }
             },
         }
     }
