@@ -31,8 +31,6 @@ $ zig build test
 85 passed; 140 skipped; 0 failed.
 ```
 
-That's 70/235 test cases passing; or about 29% of the tests passing.
-
 ### Inline Syntax
 
 | Feature | Implemented? |
@@ -42,7 +40,7 @@ That's 70/235 test cases passing; or about 29% of the tests passing.
 | images | no |
 | autolinks | yes |
 | inline verbatim | yes |
-| inline verbatim space removal | no |
+| inline verbatim space removal | yes |
 | emphasis/strong | yes |
 | inline highlight | no |
 | super/subscript | no |
@@ -78,19 +76,19 @@ That's 70/235 test cases passing; or about 29% of the tests passing.
 
 ### Command Line Interface
 
-Requires zig >= `0.10.0-dev.3567+95573dbee`.
+Using zig version `0.11.0-dev.105+a65ba6c85`:
 
 ```
 $ git clone https://github.com/leroycep/djot.zig
 $ cd djot.zig
-$ zig build install -fno-stage1
+$ zig build install
 $ echo "*Hello, world!*" | ./zig-out/bin/djot.zig
-<p><strong>Hello, world!*"</strong></p>
+<p><strong>Hello, world!</strong></p>
 ```
 
 ### Using `djot.zig` as a Library
 
-Requires zig stage2 >= `0.10.0-dev.3567+95573dbee`.
+Built with zig version `0.11.0-dev.105+a65ba6c85`. May work on `0.10`, this has not been tested.
 
 Let's make an application that extracts djot links from stdin! To get started
 we'll create a new zig project using `zig init-exe` and cloning `djot.zig`:
@@ -170,7 +168,7 @@ djot markup:
 Now let's test it out:
 
 ```bash
-$ echo "fav websites: <https://ziglang.org>, <https://djot.net>" | zig build -fno-stage1 run
+$ echo "fav websites: <https://ziglang.org>, <https://djot.net>" | zig build run
 - https://ziglang.org
 - https://djot.net
 ```
