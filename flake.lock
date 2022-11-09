@@ -15,6 +15,58 @@
         "type": "github"
       }
     },
+    "flake-utils_2": {
+      "locked": {
+        "lastModified": 1667395993,
+        "narHash": "sha256-nuEHfE/LcWyuSWnS8t12N1wc105Qtau+/OdUAjtQ0rA=",
+        "owner": "numtide",
+        "repo": "flake-utils",
+        "rev": "5aed5285a952e0b949eb3ba02c12fa4fcfef535f",
+        "type": "github"
+      },
+      "original": {
+        "owner": "numtide",
+        "repo": "flake-utils",
+        "type": "github"
+      }
+    },
+    "gitignore": {
+      "inputs": {
+        "nixpkgs": [
+          "zls",
+          "nixpkgs"
+        ]
+      },
+      "locked": {
+        "lastModified": 1660459072,
+        "narHash": "sha256-8DFJjXG8zqoONA1vXtgeKXy68KdJL5UaXR8NtVMUbx8=",
+        "owner": "hercules-ci",
+        "repo": "gitignore.nix",
+        "rev": "a20de23b925fd8264fd7fad6454652e142fd7f73",
+        "type": "github"
+      },
+      "original": {
+        "owner": "hercules-ci",
+        "repo": "gitignore.nix",
+        "type": "github"
+      }
+    },
+    "known-folders": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1659425144,
+        "narHash": "sha256-xMgdOKwWqBmw7avcioqQQrrPU1MjzlBMtNjqPfOEtDQ=",
+        "owner": "ziglibs",
+        "repo": "known-folders",
+        "rev": "24845b0103e611c108d6bc334231c464e699742c",
+        "type": "github"
+      },
+      "original": {
+        "owner": "ziglibs",
+        "repo": "known-folders",
+        "type": "github"
+      }
+    },
     "nixpkgs": {
       "locked": {
         "lastModified": 1667969101,
@@ -34,7 +86,8 @@
     "root": {
       "inputs": {
         "nixpkgs": "nixpkgs",
-        "zig": "zig"
+        "zig": "zig",
+        "zls": "zls"
       }
     },
     "zig": {
@@ -55,6 +108,32 @@
       "original": {
         "owner": "mitchellh",
         "repo": "zig-overlay",
+        "type": "github"
+      }
+    },
+    "zls": {
+      "inputs": {
+        "flake-utils": "flake-utils_2",
+        "gitignore": "gitignore",
+        "known-folders": "known-folders",
+        "nixpkgs": [
+          "nixpkgs"
+        ],
+        "zig-overlay": [
+          "zig"
+        ]
+      },
+      "locked": {
+        "lastModified": 1667706727,
+        "narHash": "sha256-tbnmJYad1VMjHTfYCVSy4fDn+c8JWIh9/YdxDLacKIk=",
+        "owner": "zigtools",
+        "repo": "zls",
+        "rev": "b08480256cc37f95e4e4144aed495fca815f5945",
+        "type": "github"
+      },
+      "original": {
+        "owner": "zigtools",
+        "repo": "zls",
         "type": "github"
       }
     }
