@@ -35,7 +35,7 @@ pub fn build(b: *std.build.Builder) void {
     }
 
     const test_step = b.step("test", "Run unit tests");
-    if (b.option(bool, "fancy-test-results", "Generate an HTML page of the results (default: true)") orelse true) {
+    if (b.option(bool, "fancy-test-results", "Generate an HTML page of the results (default: true)") orelse false) {
         const fancy_exe = b.addExecutable("fancy-test-results", "tools/fancy-test-results.zig");
         fancy_exe.setTarget(target);
         fancy_exe.setBuildMode(mode);
