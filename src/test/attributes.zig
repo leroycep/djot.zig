@@ -245,7 +245,6 @@ test "html.attributes 18" {
 }
 
 test "html.attributes 19" {
-    if (true) return error.SkipZigTest;
     try testDjotToHtml(
         \\{% This is  a comment before a
         \\  block-level item. %}

@@ -131,6 +131,10 @@ pub fn parseBlock(parent_events: *djot.EventCursor, parent_tokens: *djot.TokCurs
             break :blk;
         }
 
+        if (try parseAttribute(&events, &tokens, prefix)) |_| {
+            break :blk;
+        }
+
         if (try parseParagraph(&events, &tokens, prefix)) |_| {
             break :blk;
         }
@@ -485,6 +489,22 @@ fn parseListItem(parent_events: *djot.EventCursor, parent_tokens: *djot.TokCurso
     };
 }
 
+pub fn parseAttribute(parent_events: *djot.EventCursor, parent_tokens: *djot.TokCursor, prefix: ?*const Prefix) djot.Error!?void {
+    _ = prefix;
+
+    var events = parent_events.*;
+    var tokens = parent_tokens.*;
+
+    if (tokens.kindOf(tokens.index) == .left_curl) {
+        _ = (try parseInlineAttribute(&events, &tokens)) orelse return null;
+    } else {
+        return null;
+    }
+
+    parent_events.* = events;
+    parent_tokens.* = tokens;
+}
+
 fn parseParagraph(parent_events: *djot.EventCursor, parent_tokens: *djot.TokCursor, prefix: ?*const Prefix) djot.Error!?void {
     var events = parent_events.*;
     var tokens = parent_tokens.*;
@@ -639,6 +659,8 @@ fn parseTextSpan(parent_events: *djot.EventCursor, parent_tokens: *djot.TokCurso
         .lower_roman,
         .upper_roman,
         .tildes,
+        .percent,
+        .right_curl,
         => {
             _ = try events.append(.{ .text = token.start });
             tokens.index += 1;
@@ -652,6 +674,13 @@ fn parseTextSpan(parent_events: *djot.EventCursor, parent_tokens: *djot.TokCurso
         },
         .left_square => {
             try parseInlineLink(&events, &tokens, prefix, opener) orelse {
+                _ = try events.append(.{ .text = token.start });
+                tokens.index += 1;
+            };
+        },
+
+        .left_curl => {
+            (try parseInlineAttribute(&events, &tokens)) orelse {
                 _ = try events.append(.{ .text = token.start });
                 tokens.index += 1;
             };
@@ -708,6 +737,42 @@ fn parseTextSpan(parent_events: *djot.EventCursor, parent_tokens: *djot.TokCurso
 
     parent_tokens.* = tokens;
     parent_events.* = events;
+}
+
+fn parseInlineAttribute(parent_events: *djot.EventCursor, parent_tokens: *djot.TokCursor) djot.Error!?void {
+    var events = parent_events.*;
+    var tokens = parent_tokens.*;
+
+    _ = tokens.expect(.left_curl) orelse return null;
+
+    const State = enum {
+        default,
+        comment,
+    };
+    var state = State.default;
+
+    while (tokens.next()) |token| {
+        switch (state) {
+            .default => switch (token.kind) {
+                .eof => break,
+                .right_curl => {
+                    parent_tokens.* = tokens;
+                    parent_events.* = events;
+                    return {};
+                },
+                .percent => state = .comment,
+                else => {},
+            },
+
+            .comment => switch (token.kind) {
+                .eof => break,
+                .percent => state = .default,
+                else => {},
+            },
+        }
+    }
+
+    return null;
 }
 
 fn parseInlineImageLink(parent_events: *djot.EventCursor, parent_tokens: *djot.TokCursor, prefix: ?*const Prefix, prev_opener: ?*const PrevOpener) djot.Error!?void {
@@ -999,6 +1064,10 @@ fn parseTextSpanVerbatim(parent_events: *djot.EventCursor, parent_tokens: *djot.
             .pipe,
 
             .tildes,
+
+            .percent,
+            .left_curl,
+            .right_curl,
             => {
                 only_seen_spaces = false;
                 was_space_that_should_be_removed = false;

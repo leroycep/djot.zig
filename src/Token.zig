@@ -52,6 +52,10 @@ pub const Kind = enum(u8) {
 
     pipe,
 
+    percent,
+    left_curl,
+    right_curl,
+
     pub fn isAsterisk(this: @This()) bool {
         switch (this) {
             .asterisk,
@@ -189,9 +193,14 @@ pub fn parse(source: []const u8, start: usize) @This() {
                     state = .underscore;
                 },
                 '{' => {
-                    res.kind = .text;
+                    res.kind = .left_curl;
                     res.end = index;
                     state = .lcurl;
+                },
+                '}' => {
+                    res.kind = .right_curl;
+                    res.end = index;
+                    break;
                 },
                 '!' => {
                     res.kind = .exclaimation;
@@ -283,6 +292,11 @@ pub fn parse(source: []const u8, start: usize) @This() {
                     res.end = index;
                     break;
                 },
+                '%' => {
+                    res.kind = .percent;
+                    res.end = index;
+                    break;
+                },
                 else => {
                     res.kind = .text;
                     res.end = index;
@@ -324,6 +338,7 @@ pub fn parse(source: []const u8, start: usize) @This() {
                 ']',
                 '|',
                 ')',
+                '%',
                 => break,
 
                 ' ' => {
@@ -352,6 +367,7 @@ pub fn parse(source: []const u8, start: usize) @This() {
                 ']',
                 '|',
                 ')',
+                '%',
                 => break,
 
                 ' ' => state = .text_space,
@@ -381,6 +397,7 @@ pub fn parse(source: []const u8, start: usize) @This() {
                 ']',
                 ')',
                 '|',
+                '%',
                 => break,
 
                 ' ' => {
@@ -406,6 +423,7 @@ pub fn parse(source: []const u8, start: usize) @This() {
                 ']',
                 ')',
                 '|',
+                '%',
                 => break,
 
                 ' ' => {},
@@ -423,7 +441,7 @@ pub fn parse(source: []const u8, start: usize) @This() {
             .text_hyphen => switch (c) {
                 '-' => break,
 
-                '`', '*', '_', '{', '\\', '!', '[', ']', '|' => break,
+                '`', '*', '_', '{', '\\', '!', '[', ']', '|', '%' => break,
 
                 ' ' => state = .text_space,
                 '\n' => {
