@@ -10,12 +10,17 @@ pub fn toHtml(allocator: std.mem.Allocator, source: []const u8, html_writer: any
     defer doc.deinit(allocator);
 
     var in_alt_text: u32 = 0;
+    var in_raw = false;
 
     for (doc.events.items(.tag)) |event_kind, event_index| {
         switch (event_kind) {
             .text,
             .escaped,
-            => try html.writeEscaped(doc.asText(event_index), html_writer),
+            => if (in_raw) {
+                try html_writer.writeAll(doc.asText(event_index));
+            } else {
+                try html.writeEscaped(doc.asText(event_index), html_writer);
+            },
 
             .character => try html.writeUTF8CharEscaped(doc.events.items(.data)[event_index].character, html_writer),
 
@@ -91,8 +96,22 @@ pub fn toHtml(allocator: std.mem.Allocator, source: []const u8, html_writer: any
 
             .start_code_block => try html_writer.writeAll("<pre><code>"),
             .close_code_block => try html_writer.writeAll("</code></pre>\n"),
-            .start_code_language => try html_writer.print("<pre><code class=\"language-{}\">", .{std.zig.fmtEscapes(doc.asText(event_index))}),
-            .close_code_language => try html_writer.writeAll("</code></pre>\n"),
+            .start_code_language => {
+                const language = doc.asText(event_index);
+                if (std.mem.eql(u8, language, "=html")) {
+                    in_raw = true;
+                } else {
+                    try html_writer.print("<pre><code class=\"language-{}\">", .{std.zig.fmtEscapes(language)});
+                }
+            },
+            .close_code_language => {
+                const language = doc.asText(event_index);
+                if (std.mem.eql(u8, language, "=html")) {
+                    in_raw = false;
+                } else {
+                    try html_writer.writeAll("</code></pre>\n");
+                }
+            },
 
             .start_table => try html_writer.writeAll("<table>\n"),
             .close_table => try html_writer.writeAll("</table>\n"),

@@ -12,7 +12,6 @@ test "html.raw 0" {
 }
 
 test "html.raw 1" {
-    if (true) return error.SkipZigTest;
     try testDjotToHtml(
         \\``` =html
         \\<table>
